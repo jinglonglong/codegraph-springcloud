@@ -37,7 +37,7 @@
     "better-sqlite3": "^11.0.0",
     "commander": "^14.0.2",
     "figlet": "^1.8.0",
-    "tree-sitter": "0.22.4"
+    "tree-sitter": "0.21.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
@@ -47,26 +47,26 @@
     "vitest": "^2.1.9"
   },
   "optionalDependencies": {
+    "@sengac/tree-sitter-dart": "1.1.6",
     "sqlite-vss": "^0.1.2",
-    "tree-sitter-c": "0.24.1",
+    "tree-sitter-c": "0.23.2",
     "tree-sitter-c-sharp": "0.23.1",
     "tree-sitter-cpp": "0.23.4",
-    "@sengac/tree-sitter-dart": "1.1.6",
     "tree-sitter-go": "0.23.4",
     "tree-sitter-java": "0.23.5",
     "tree-sitter-javascript": "0.23.1",
     "tree-sitter-kotlin": "0.3.8",
-    "tree-sitter-php": "0.24.2",
-    "tree-sitter-python": "0.23.6",
+    "tree-sitter-php": "0.23.11",
+    "tree-sitter-python": "0.23.4",
     "tree-sitter-ruby": "0.23.1",
-    "tree-sitter-rust": "0.24.0",
-    "tree-sitter-swift": "0.7.1",
+    "tree-sitter-rust": "0.23.1",
+    "tree-sitter-swift": "0.6.0",
     "tree-sitter-typescript": "0.23.2"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "overrides": {
-    "tree-sitter": "0.22.4"
+    "tree-sitter": "0.21.1"
   }
 }
