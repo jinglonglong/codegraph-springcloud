@@ -54,6 +54,7 @@ export function validateConfig(config: unknown): config is CodeGraphConfig {
     'go',
     'rust',
     'java',
+    'svelte',
     'unknown',
   ];
   if (!c.languages.every((l) => validLanguages.includes(l as Language))) return false;

@@ -72,6 +72,7 @@ export type Language =
   | 'swift'
   | 'kotlin'
   | 'dart'
+  | 'svelte'
   | 'liquid'
   | 'unknown';
 
@@ -511,6 +512,8 @@ export const DEFAULT_CONFIG: CodeGraphConfig = {
     '**/*.kts',
     // Dart
     '**/*.dart',
+    // Svelte
+    '**/*.svelte',
     // Liquid (Shopify themes)
     '**/*.liquid',
   ],

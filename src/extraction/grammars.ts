@@ -9,7 +9,7 @@ import Parser from 'tree-sitter';
 import { Language } from '../types';
 
 type GrammarLoader = () => unknown;
-type GrammarLanguage = Exclude<Language, 'liquid' | 'unknown'>;
+type GrammarLanguage = Exclude<Language, 'svelte' | 'liquid' | 'unknown'>;
 
 /**
  * Lazy grammar loaders — each language's native binding is only loaded
@@ -115,6 +115,7 @@ export const EXTENSION_MAP: Record<string, Language> = {
   '.kts': 'kotlin',
   '.dart': 'dart',
   '.liquid': 'liquid',
+  '.svelte': 'svelte',
 };
 
 /**
@@ -186,6 +187,7 @@ export function detectLanguage(filePath: string): Language {
  * Check if a language is supported by currently available parsers.
  */
 export function isLanguageSupported(language: Language): boolean {
+  if (language === 'svelte') return true; // custom extractor (script block delegation)
   if (language === 'liquid') return true; // custom regex extractor
   if (language === 'unknown') return false;
   return loadGrammar(language) !== null;
@@ -197,7 +199,7 @@ export function isLanguageSupported(language: Language): boolean {
 export function getSupportedLanguages(): Language[] {
   const available = (Object.keys(grammarLoaders) as GrammarLanguage[])
     .filter((language) => loadGrammar(language) !== null);
-  return [...available, 'liquid'];
+  return [...available, 'svelte', 'liquid'];
 }
 
 /**
@@ -241,6 +243,7 @@ export function getLanguageDisplayName(language: Language): string {
     swift: 'Swift',
     kotlin: 'Kotlin',
     dart: 'Dart',
+    svelte: 'Svelte',
     liquid: 'Liquid',
     unknown: 'Unknown',
   };
