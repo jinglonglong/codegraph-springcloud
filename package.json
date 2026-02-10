@@ -1,6 +1,6 @@
 {
   "name": "@colbymchenry/codegraph",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Supercharge Claude Code with semantic code intelligence. 30% fewer tokens, 25% fewer tool calls, 100% local.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -37,7 +37,17 @@
     "better-sqlite3": "^11.0.0",
     "commander": "^14.0.2",
     "figlet": "^1.8.0",
-    "tree-sitter": "0.22.4",
+    "tree-sitter": "0.22.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/figlet": "^1.5.8",
+    "@types/node": "^20.19.30",
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.9"
+  },
+  "optionalDependencies": {
+    "sqlite-vss": "^0.1.2",
     "tree-sitter-c": "0.23.4",
     "tree-sitter-c-sharp": "0.23.1",
     "tree-sitter-cpp": "0.23.4",
@@ -52,16 +62,6 @@
     "tree-sitter-rust": "0.23.2",
     "tree-sitter-swift": "0.7.1",
     "tree-sitter-typescript": "0.23.2"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
-    "@types/figlet": "^1.5.8",
-    "@types/node": "^20.19.30",
-    "typescript": "^5.0.0",
-    "vitest": "^2.1.9"
-  },
-  "optionalDependencies": {
-    "sqlite-vss": "^0.1.2"
   },
   "engines": {
     "node": ">=18.0.0"
