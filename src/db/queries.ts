@@ -17,6 +17,7 @@ import {
   SearchOptions,
   SearchResult,
 } from '../types';
+import { safeJsonParse } from '../utils';
 
 /**
  * Database row types (snake_case from SQLite)
@@ -97,8 +98,8 @@ function rowToNode(row: NodeRow): Node {
     isAsync: row.is_async === 1,
     isStatic: row.is_static === 1,
     isAbstract: row.is_abstract === 1,
-    decorators: row.decorators ? JSON.parse(row.decorators) : undefined,
-    typeParameters: row.type_parameters ? JSON.parse(row.type_parameters) : undefined,
+    decorators: row.decorators ? safeJsonParse(row.decorators, undefined) : undefined,
+    typeParameters: row.type_parameters ? safeJsonParse(row.type_parameters, undefined) : undefined,
     updatedAt: row.updated_at,
   };
 }
@@ -111,7 +112,7 @@ function rowToEdge(row: EdgeRow): Edge {
     source: row.source,
     target: row.target,
     kind: row.kind as EdgeKind,
-    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    metadata: row.metadata ? safeJsonParse(row.metadata, undefined) : undefined,
     line: row.line ?? undefined,
     column: row.col ?? undefined,
   };
@@ -129,7 +130,7 @@ function rowToFileRecord(row: FileRow): FileRecord {
     modifiedAt: row.modified_at,
     indexedAt: row.indexed_at,
     nodeCount: row.node_count,
-    errors: row.errors ? JSON.parse(row.errors) : undefined,
+    errors: row.errors ? safeJsonParse(row.errors, undefined) : undefined,
   };
 }
 
@@ -820,7 +821,7 @@ export class QueryBuilder {
       referenceKind: row.reference_kind as EdgeKind,
       line: row.line,
       column: row.col,
-      candidates: row.candidates ? JSON.parse(row.candidates) : undefined,
+      candidates: row.candidates ? safeJsonParse<string[]>(row.candidates, []) : undefined,
     }));
   }
 
@@ -835,7 +836,7 @@ export class QueryBuilder {
       referenceKind: row.reference_kind as EdgeKind,
       line: row.line,
       column: row.col,
-      candidates: row.candidates ? JSON.parse(row.candidates) : undefined,
+      candidates: row.candidates ? safeJsonParse<string[]>(row.candidates, []) : undefined,
     }));
   }
 

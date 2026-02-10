@@ -8,6 +8,7 @@ import CodeGraph, { findNearestCodeGraphRoot } from '../index';
 import type { Node, SearchResult, Subgraph, TaskContext, NodeKind } from '../types';
 import { createHash } from 'crypto';
 import { writeFileSync } from 'fs';
+import { clamp } from '../utils';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -351,7 +352,7 @@ export class ToolHandler {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const query = args.query as string;
     const kind = args.kind as string | undefined;
-    const limit = (args.limit as number) || 10;
+    const limit = clamp((args.limit as number) || 10, 1, 100);
 
     const results = cg.searchNodes(query, {
       limit,
@@ -436,7 +437,7 @@ export class ToolHandler {
   private async handleCallers(args: Record<string, unknown>): Promise<ToolResult> {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const symbol = args.symbol as string;
-    const limit = (args.limit as number) || 20;
+    const limit = clamp((args.limit as number) || 20, 1, 100);
 
     // First find the node by name
     const results = cg.searchNodes(symbol, { limit: 1 });
@@ -463,7 +464,7 @@ export class ToolHandler {
   private async handleCallees(args: Record<string, unknown>): Promise<ToolResult> {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const symbol = args.symbol as string;
-    const limit = (args.limit as number) || 20;
+    const limit = clamp((args.limit as number) || 20, 1, 100);
 
     // First find the node by name
     const results = cg.searchNodes(symbol, { limit: 1 });
@@ -490,7 +491,7 @@ export class ToolHandler {
   private async handleImpact(args: Record<string, unknown>): Promise<ToolResult> {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const symbol = args.symbol as string;
-    const depth = (args.depth as number) || 2;
+    const depth = clamp((args.depth as number) || 2, 1, 10);
 
     // First find the node by name
     const results = cg.searchNodes(symbol, { limit: 1 });
@@ -574,7 +575,7 @@ export class ToolHandler {
     const pattern = args.pattern as string | undefined;
     const format = (args.format as 'tree' | 'flat' | 'grouped') || 'tree';
     const includeMetadata = args.includeMetadata !== false;
-    const maxDepth = args.maxDepth as number | undefined;
+    const maxDepth = args.maxDepth != null ? clamp(args.maxDepth as number, 1, 20) : undefined;
 
     // Get all files from the index
     const allFiles = cg.getFiles();

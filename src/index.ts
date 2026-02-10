@@ -47,7 +47,7 @@ import {
 import { GraphTraverser, GraphQueryManager } from './graph';
 import { VectorManager, createVectorManager, EmbeddingProgress } from './vectors';
 import { ContextBuilder, createContextBuilder } from './context';
-import { Mutex } from './utils';
+import { Mutex, FileLock } from './utils';
 
 // Re-export types for consumers
 export * from './types';
@@ -77,7 +77,7 @@ export {
   silentLogger,
   defaultLogger,
 } from './errors';
-export { Mutex, processInBatches, debounce, throttle, MemoryMonitor } from './utils';
+export { Mutex, FileLock, processInBatches, debounce, throttle, MemoryMonitor } from './utils';
 export { MCPServer } from './mcp';
 
 /**
@@ -133,8 +133,11 @@ export class CodeGraph {
   private vectorManager: VectorManager | null = null;
   private contextBuilder: ContextBuilder;
 
-  // Mutex for preventing concurrent indexing operations
+  // Mutex for preventing concurrent indexing operations (in-process)
   private indexMutex = new Mutex();
+
+  // File lock for preventing concurrent writes across processes (CLI, MCP, git hooks)
+  private fileLock: FileLock;
 
   private constructor(
     db: DatabaseConnection,
@@ -146,6 +149,7 @@ export class CodeGraph {
     this.queries = queries;
     this.config = config;
     this.projectRoot = projectRoot;
+    this.fileLock = new FileLock(db.getPath());
     this.orchestrator = new ExtractionOrchestrator(projectRoot, config, queries);
     this.resolver = createResolver(projectRoot, queries);
     this.graphManager = new GraphQueryManager(queries);
@@ -317,6 +321,8 @@ export class CodeGraph {
    * Close the CodeGraph instance and release resources
    */
   close(): void {
+    // Release file lock if held
+    this.fileLock.release();
     // Dispose vector manager first to release ONNX workers
     if (this.vectorManager) {
       this.vectorManager.dispose();
@@ -369,29 +375,37 @@ export class CodeGraph {
    */
   async indexAll(options: IndexOptions = {}): Promise<IndexResult> {
     return this.indexMutex.withLock(async () => {
-      const result = await this.orchestrator.indexAll(options.onProgress, options.signal);
+      const locked = await this.fileLock.acquire();
+      if (!locked) {
+        return { success: false, filesIndexed: 0, filesSkipped: 0, nodesCreated: 0, edgesCreated: 0, errors: [{ message: 'Could not acquire file lock - another process may be indexing', severity: 'error' as const }], durationMs: 0 };
+      }
+      try {
+        const result = await this.orchestrator.indexAll(options.onProgress, options.signal);
 
-      // Resolve references to create call/import/extends edges
-      if (result.success && result.filesIndexed > 0) {
-        // Get count of unresolved references for accurate progress
-        const unresolvedCount = this.queries.getUnresolvedReferences().length;
+        // Resolve references to create call/import/extends edges
+        if (result.success && result.filesIndexed > 0) {
+          // Get count of unresolved references for accurate progress
+          const unresolvedCount = this.queries.getUnresolvedReferences().length;
 
-        options.onProgress?.({
-          phase: 'resolving',
-          current: 0,
-          total: unresolvedCount,
-        });
-
-        this.resolveReferences((current, total) => {
           options.onProgress?.({
             phase: 'resolving',
-            current,
-            total,
+            current: 0,
+            total: unresolvedCount,
           });
-        });
-      }
 
-      return result;
+          this.resolveReferences((current, total) => {
+            options.onProgress?.({
+              phase: 'resolving',
+              current,
+              total,
+            });
+          });
+        }
+
+        return result;
+      } finally {
+        this.fileLock.release();
+      }
     });
   }
 
@@ -402,7 +416,15 @@ export class CodeGraph {
    */
   async indexFiles(filePaths: string[]): Promise<IndexResult> {
     return this.indexMutex.withLock(async () => {
-      return this.orchestrator.indexFiles(filePaths);
+      const locked = await this.fileLock.acquire();
+      if (!locked) {
+        return { success: false, filesIndexed: 0, filesSkipped: 0, nodesCreated: 0, edgesCreated: 0, errors: [{ message: 'Could not acquire file lock - another process may be indexing', severity: 'error' as const }], durationMs: 0 };
+      }
+      try {
+        return this.orchestrator.indexFiles(filePaths);
+      } finally {
+        this.fileLock.release();
+      }
     });
   }
 
@@ -413,28 +435,36 @@ export class CodeGraph {
    */
   async sync(options: IndexOptions = {}): Promise<SyncResult> {
     return this.indexMutex.withLock(async () => {
-      const result = await this.orchestrator.sync(options.onProgress);
+      const locked = await this.fileLock.acquire();
+      if (!locked) {
+        return { filesChecked: 0, filesAdded: 0, filesModified: 0, filesRemoved: 0, nodesUpdated: 0, durationMs: 0 };
+      }
+      try {
+        const result = await this.orchestrator.sync(options.onProgress);
 
-      // Resolve references if files were updated
-      if (result.filesAdded > 0 || result.filesModified > 0) {
-        const unresolvedCount = this.queries.getUnresolvedReferences().length;
+        // Resolve references if files were updated
+        if (result.filesAdded > 0 || result.filesModified > 0) {
+          const unresolvedCount = this.queries.getUnresolvedReferences().length;
 
-        options.onProgress?.({
-          phase: 'resolving',
-          current: 0,
-          total: unresolvedCount,
-        });
-
-        this.resolveReferences((current, total) => {
           options.onProgress?.({
             phase: 'resolving',
-            current,
-            total,
+            current: 0,
+            total: unresolvedCount,
           });
-        });
-      }
 
-      return result;
+          this.resolveReferences((current, total) => {
+            options.onProgress?.({
+              phase: 'resolving',
+              current,
+              total,
+            });
+          });
+        }
+
+        return result;
+      } finally {
+        this.fileLock.release();
+      }
     });
   }
 

@@ -6,7 +6,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   Node,
   Edge,
@@ -25,6 +24,7 @@ import { GraphTraverser } from '../graph';
 import { VectorManager } from '../vectors';
 import { formatContextAsMarkdown, formatContextAsJson } from './formatter';
 import { logDebug, logWarn } from '../errors';
+import { validatePathWithinRoot } from '../utils';
 
 /**
  * Extract likely symbol names from a natural language query
@@ -438,9 +438,9 @@ export class ContextBuilder {
    * Extract code from a node's source file
    */
   private async extractNodeCode(node: Node): Promise<string | null> {
-    const filePath = path.join(this.projectRoot, node.filePath);
+    const filePath = validatePathWithinRoot(this.projectRoot, node.filePath);
 
-    if (!fs.existsSync(filePath)) {
+    if (!filePath || !fs.existsSync(filePath)) {
       return null;
     }
 

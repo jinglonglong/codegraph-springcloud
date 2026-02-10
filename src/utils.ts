@@ -1,13 +1,14 @@
 /**
  * CodeGraph Utilities
  *
- * Common utility functions for memory management, concurrency, and batching.
+ * Common utility functions for memory management, concurrency, batching,
+ * and security validation.
  *
  * @module utils
  *
  * @example
  * ```typescript
- * import { Mutex, processInBatches, MemoryMonitor } from 'codegraph';
+ * import { Mutex, processInBatches, MemoryMonitor, validatePathWithinRoot } from 'codegraph';
  *
  * // Use mutex for concurrent safety
  * const mutex = new Mutex();
@@ -27,6 +28,113 @@
  * monitor.start();
  * ```
  */
+
+import * as path from 'path';
+import * as fs from 'fs';
+
+// ============================================================
+// SECURITY UTILITIES
+// ============================================================
+
+/**
+ * Validate that a resolved file path stays within the project root.
+ * Prevents path traversal attacks (e.g. node.filePath = "../../etc/passwd").
+ *
+ * @param projectRoot - The project root directory
+ * @param filePath - The relative file path to validate
+ * @returns The resolved absolute path, or null if it escapes the root
+ */
+export function validatePathWithinRoot(projectRoot: string, filePath: string): string | null {
+  const resolved = path.resolve(projectRoot, filePath);
+  const normalizedRoot = path.resolve(projectRoot);
+
+  if (!resolved.startsWith(normalizedRoot + path.sep) && resolved !== normalizedRoot) {
+    return null;
+  }
+  return resolved;
+}
+
+/**
+ * Safely parse JSON with a fallback value.
+ * Prevents crashes from corrupted database metadata.
+ */
+export function safeJsonParse<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Clamp a numeric value to a range.
+ * Used to enforce sane limits on MCP tool inputs.
+ */
+export function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Cross-process file lock using lock files.
+ * Prevents concurrent database writes from CLI, MCP server, and git hooks.
+ */
+export class FileLock {
+  private lockPath: string;
+  private acquired = false;
+
+  constructor(resourcePath: string) {
+    this.lockPath = resourcePath + '.lock';
+  }
+
+  /**
+   * Acquire the file lock. Waits up to timeoutMs for the lock.
+   * Cleans up stale locks older than staleLockMs.
+   */
+  async acquire(timeoutMs: number = 10000, staleLockMs: number = 30000): Promise<boolean> {
+    const start = Date.now();
+
+    while (Date.now() - start < timeoutMs) {
+      try {
+        // Try to create lock file exclusively
+        fs.writeFileSync(this.lockPath, String(process.pid), { flag: 'wx' });
+        this.acquired = true;
+        return true;
+      } catch {
+        // Lock file exists - check if stale
+        try {
+          const stat = fs.statSync(this.lockPath);
+          if (Date.now() - stat.mtimeMs > staleLockMs) {
+            // Stale lock - remove and retry
+            fs.unlinkSync(this.lockPath);
+            continue;
+          }
+        } catch {
+          // Lock file disappeared between check and stat - retry
+          continue;
+        }
+
+        // Wait and retry
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Release the file lock
+   */
+  release(): void {
+    if (this.acquired) {
+      try {
+        fs.unlinkSync(this.lockPath);
+      } catch {
+        // Lock file already removed - that's fine
+      }
+      this.acquired = false;
+    }
+  }
+}
 
 /**
  * Process items in batches to manage memory

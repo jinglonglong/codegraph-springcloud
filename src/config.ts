@@ -154,7 +154,11 @@ export function saveConfig(projectRoot: string, config: CodeGraphConfig): void {
   delete (toSave as Partial<CodeGraphConfig>).rootDir;
 
   const content = JSON.stringify(toSave, null, 2);
-  fs.writeFileSync(configPath, content, 'utf-8');
+
+  // Atomic write: write to temp file then rename to prevent partial/corrupt configs
+  const tmpPath = configPath + '.tmp';
+  fs.writeFileSync(tmpPath, content, 'utf-8');
+  fs.renameSync(tmpPath, configPath);
 }
 
 /**
