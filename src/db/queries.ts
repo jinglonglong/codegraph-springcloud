@@ -73,6 +73,8 @@ interface UnresolvedRefRow {
   reference_kind: string;
   line: number;
   col: number;
+  file_path: string | null;
+  language: string | null;
   candidates: string | null;
 }
 
@@ -419,6 +421,14 @@ export class QueryBuilder {
       this.stmts.getNodesByKind = this.db.prepare('SELECT * FROM nodes WHERE kind = ?');
     }
     const rows = this.stmts.getNodesByKind.all(kind) as NodeRow[];
+    return rows.map(rowToNode);
+  }
+
+  /**
+   * Get all nodes in the database
+   */
+  getAllNodes(): Node[] {
+    const rows = this.db.prepare('SELECT * FROM nodes').all() as NodeRow[];
     return rows.map(rowToNode);
   }
 
@@ -778,8 +788,8 @@ export class QueryBuilder {
   insertUnresolvedRef(ref: UnresolvedReference): void {
     if (!this.stmts.insertUnresolved) {
       this.stmts.insertUnresolved = this.db.prepare(`
-        INSERT INTO unresolved_refs (from_node_id, reference_name, reference_kind, line, col, candidates)
-        VALUES (@fromNodeId, @referenceName, @referenceKind, @line, @col, @candidates)
+        INSERT INTO unresolved_refs (from_node_id, reference_name, reference_kind, line, col, file_path, language, candidates)
+        VALUES (@fromNodeId, @referenceName, @referenceKind, @line, @col, @filePath, @language, @candidates)
       `);
     }
 
@@ -789,8 +799,39 @@ export class QueryBuilder {
       referenceKind: ref.referenceKind,
       line: ref.line,
       col: ref.column,
+      filePath: ref.filePath ?? null,
+      language: ref.language ?? null,
       candidates: ref.candidates ? JSON.stringify(ref.candidates) : null,
     });
+  }
+
+  /**
+   * Insert multiple unresolved references in a single transaction
+   */
+  insertUnresolvedRefsBatch(refs: UnresolvedReference[]): void {
+    if (refs.length === 0) return;
+
+    if (!this.stmts.insertUnresolved) {
+      this.stmts.insertUnresolved = this.db.prepare(`
+        INSERT INTO unresolved_refs (from_node_id, reference_name, reference_kind, line, col, file_path, language, candidates)
+        VALUES (@fromNodeId, @referenceName, @referenceKind, @line, @col, @filePath, @language, @candidates)
+      `);
+    }
+
+    this.db.transaction(() => {
+      for (const ref of refs) {
+        this.stmts.insertUnresolved!.run({
+          fromNodeId: ref.fromNodeId,
+          referenceName: ref.referenceName,
+          referenceKind: ref.referenceKind,
+          line: ref.line,
+          col: ref.column,
+          filePath: ref.filePath ?? null,
+          language: ref.language ?? null,
+          candidates: ref.candidates ? JSON.stringify(ref.candidates) : null,
+        });
+      }
+    })();
   }
 
   /**
@@ -821,6 +862,8 @@ export class QueryBuilder {
       referenceKind: row.reference_kind as EdgeKind,
       line: row.line,
       column: row.col,
+      filePath: row.file_path ?? undefined,
+      language: (row.language as Language) ?? undefined,
       candidates: row.candidates ? safeJsonParse<string[]>(row.candidates, []) : undefined,
     }));
   }
@@ -836,6 +879,8 @@ export class QueryBuilder {
       referenceKind: row.reference_kind as EdgeKind,
       line: row.line,
       column: row.col,
+      filePath: row.file_path ?? undefined,
+      language: (row.language as Language) ?? undefined,
       candidates: row.candidates ? safeJsonParse<string[]>(row.candidates, []) : undefined,
     }));
   }

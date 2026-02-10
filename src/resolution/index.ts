@@ -36,6 +36,10 @@ export class ReferenceResolver {
   private frameworks: FrameworkResolver[] = [];
   private nodeCache: Map<string, Node[]> = new Map();
   private fileCache: Map<string, string | null> = new Map();
+  private nameCache: Map<string, Node[]> = new Map();
+  private qualifiedNameCache: Map<string, Node[]> = new Map();
+  private nodeByIdCache: Map<string, Node> = new Map();
+  private cachesWarmed = false;
 
   constructor(projectRoot: string, queries: QueryBuilder) {
     this.projectRoot = projectRoot;
@@ -52,11 +56,47 @@ export class ReferenceResolver {
   }
 
   /**
+   * Pre-load all nodes into memory maps for fast lookup during resolution.
+   * This eliminates repeated SQLite queries and provides the core speedup.
+   */
+  warmCaches(): void {
+    if (this.cachesWarmed) return;
+
+    const allNodes = this.queries.getAllNodes();
+    for (const node of allNodes) {
+      // Index by name
+      const byName = this.nameCache.get(node.name);
+      if (byName) {
+        byName.push(node);
+      } else {
+        this.nameCache.set(node.name, [node]);
+      }
+
+      // Index by qualified name
+      const byQName = this.qualifiedNameCache.get(node.qualifiedName);
+      if (byQName) {
+        byQName.push(node);
+      } else {
+        this.qualifiedNameCache.set(node.qualifiedName, [node]);
+      }
+
+      // Index by ID
+      this.nodeByIdCache.set(node.id, node);
+    }
+
+    this.cachesWarmed = true;
+  }
+
+  /**
    * Clear internal caches
    */
   clearCaches(): void {
     this.nodeCache.clear();
     this.fileCache.clear();
+    this.nameCache.clear();
+    this.qualifiedNameCache.clear();
+    this.nodeByIdCache.clear();
+    this.cachesWarmed = false;
   }
 
   /**
@@ -72,11 +112,18 @@ export class ReferenceResolver {
       },
 
       getNodesByName: (name: string) => {
+        // Use warm cache if available, otherwise fall back to search
+        if (this.cachesWarmed) {
+          return this.nameCache.get(name) ?? [];
+        }
         return this.queries.searchNodes(name, { limit: 100 }).map((r) => r.node);
       },
 
       getNodesByQualifiedName: (qualifiedName: string) => {
-        // Search for exact qualified name match
+        // Use warm cache if available, otherwise fall back to search + filter
+        if (this.cachesWarmed) {
+          return this.qualifiedNameCache.get(qualifiedName) ?? [];
+        }
         return this.queries
           .searchNodes(qualifiedName, { limit: 50 })
           .filter((r) => r.node.qualifiedName === qualifiedName)
@@ -131,19 +178,22 @@ export class ReferenceResolver {
     unresolvedRefs: UnresolvedReference[],
     onProgress?: (current: number, total: number) => void
   ): ResolutionResult {
+    // Pre-load all nodes into memory for fast lookups
+    this.warmCaches();
+
     const resolved: ResolvedRef[] = [];
     const unresolved: UnresolvedRef[] = [];
     const byMethod: Record<string, number> = {};
 
-    // Convert to our internal format
+    // Convert to our internal format, using denormalized fields when available
     const refs: UnresolvedRef[] = unresolvedRefs.map((ref) => ({
       fromNodeId: ref.fromNodeId,
       referenceName: ref.referenceName,
       referenceKind: ref.referenceKind,
       line: ref.line,
       column: ref.column,
-      filePath: this.getFilePathFromNodeId(ref.fromNodeId),
-      language: this.getLanguageFromNodeId(ref.fromNodeId),
+      filePath: ref.filePath || this.getFilePathFromNodeId(ref.fromNodeId),
+      language: ref.language || this.getLanguageFromNodeId(ref.fromNodeId),
     }));
 
     const total = refs.length;
@@ -311,6 +361,9 @@ export class ReferenceResolver {
    * Get file path from node ID
    */
   private getFilePathFromNodeId(nodeId: string): string {
+    // Check warm cache first
+    const cached = this.nodeByIdCache.get(nodeId);
+    if (cached) return cached.filePath;
     const node = this.queries.getNodeById(nodeId);
     return node?.filePath || '';
   }
@@ -319,6 +372,9 @@ export class ReferenceResolver {
    * Get language from node ID
    */
   private getLanguageFromNodeId(nodeId: string): UnresolvedRef['language'] {
+    // Check warm cache first
+    const cached = this.nodeByIdCache.get(nodeId);
+    if (cached) return cached.language;
     const node = this.queries.getNodeById(nodeId);
     return node?.language || 'unknown';
   }

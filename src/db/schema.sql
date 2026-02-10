@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 -- Insert initial version
 INSERT INTO schema_versions (version, applied_at, description)
 VALUES (1, strftime('%s', 'now') * 1000, 'Initial schema');
+INSERT INTO schema_versions (version, applied_at, description)
+VALUES (2, strftime('%s', 'now') * 1000, 'Add filePath and language to unresolved_refs');
 
 -- =============================================================================
 -- Core Tables
@@ -73,6 +75,8 @@ CREATE TABLE IF NOT EXISTS unresolved_refs (
     reference_kind TEXT NOT NULL,
     line INTEGER NOT NULL,
     col INTEGER NOT NULL,
+    file_path TEXT,
+    language TEXT,
     candidates TEXT, -- JSON array
     FOREIGN KEY (from_node_id) REFERENCES nodes(id) ON DELETE CASCADE
 );

@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import {
@@ -399,8 +400,8 @@ export class ExtractionOrchestrator {
     let content: string;
     let stats: fs.Stats;
     try {
-      stats = fs.statSync(fullPath);
-      content = fs.readFileSync(fullPath, 'utf-8');
+      stats = await fsp.stat(fullPath);
+      content = await fsp.readFile(fullPath, 'utf-8');
     } catch (error) {
       captureException(error, { operation: 'extract-file', filePath: fullPath });
       return {
@@ -489,9 +490,14 @@ export class ExtractionOrchestrator {
       this.queries.insertEdges(result.edges);
     }
 
-    // Insert unresolved references
-    for (const ref of result.unresolvedReferences) {
-      this.queries.insertUnresolvedRef(ref);
+    // Insert unresolved references in batch with denormalized filePath/language
+    if (result.unresolvedReferences.length > 0) {
+      const refsWithContext = result.unresolvedReferences.map((ref) => ({
+        ...ref,
+        filePath: ref.filePath ?? filePath,
+        language: ref.language ?? language,
+      }));
+      this.queries.insertUnresolvedRefsBatch(refsWithContext);
     }
 
     // Insert file record

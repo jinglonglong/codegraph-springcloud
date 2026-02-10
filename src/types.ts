@@ -257,6 +257,12 @@ export interface UnresolvedReference {
   line: number;
   column: number;
 
+  /** File path where reference occurs (denormalized for performance) */
+  filePath?: string;
+
+  /** Language of the source file (denormalized for performance) */
+  language?: Language;
+
   /** Possible qualified names it might resolve to */
   candidates?: string[];
 }

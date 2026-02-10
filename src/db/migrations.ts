@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * Migration definition
@@ -27,17 +27,16 @@ interface Migration {
  * Future migrations go here.
  */
 const migrations: Migration[] = [
-  // Example migration for version 2 (when needed):
-  // {
-  //   version: 2,
-  //   description: 'Add support for module resolution',
-  //   up: (db) => {
-  //     db.exec(`
-  //       ALTER TABLE nodes ADD COLUMN module_path TEXT;
-  //       CREATE INDEX idx_nodes_module_path ON nodes(module_path);
-  //     `);
-  //   },
-  // },
+  {
+    version: 2,
+    description: 'Add filePath and language to unresolved_refs for performance',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE unresolved_refs ADD COLUMN file_path TEXT;
+        ALTER TABLE unresolved_refs ADD COLUMN language TEXT;
+      `);
+    },
+  },
 ];
 
 /**
