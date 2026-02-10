@@ -364,7 +364,7 @@ export class ToolHandler {
     }
 
     const formatted = this.formatSearchResults(results);
-    return this.textResult(formatted);
+    return this.textResult(this.truncateOutput(formatted));
   }
 
   /**
@@ -439,23 +439,20 @@ export class ToolHandler {
     const symbol = args.symbol as string;
     const limit = clamp((args.limit as number) || 20, 1, 100);
 
-    // First find the node by name
-    const results = cg.searchNodes(symbol, { limit: 1 });
-    if (results.length === 0 || !results[0]) {
+    const match = this.findSymbol(cg, symbol);
+    if (!match) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const node = results[0].node;
-    const callers = cg.getCallers(node.id);
+    const callers = cg.getCallers(match.node.id);
 
     if (callers.length === 0) {
-      return this.textResult(`No callers found for "${symbol}"`);
+      return this.textResult(`No callers found for "${symbol}"${match.note}`);
     }
 
-    // Extract just the nodes from the { node, edge } tuples
     const callerNodes = callers.slice(0, limit).map(c => c.node);
-    const formatted = this.formatNodeList(callerNodes, `Callers of ${symbol}`);
-    return this.textResult(formatted);
+    const formatted = this.formatNodeList(callerNodes, `Callers of ${symbol}`) + match.note;
+    return this.textResult(this.truncateOutput(formatted));
   }
 
   /**
@@ -466,23 +463,20 @@ export class ToolHandler {
     const symbol = args.symbol as string;
     const limit = clamp((args.limit as number) || 20, 1, 100);
 
-    // First find the node by name
-    const results = cg.searchNodes(symbol, { limit: 1 });
-    if (results.length === 0 || !results[0]) {
+    const match = this.findSymbol(cg, symbol);
+    if (!match) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const node = results[0].node;
-    const callees = cg.getCallees(node.id);
+    const callees = cg.getCallees(match.node.id);
 
     if (callees.length === 0) {
-      return this.textResult(`No callees found for "${symbol}"`);
+      return this.textResult(`No callees found for "${symbol}"${match.note}`);
     }
 
-    // Extract just the nodes from the { node, edge } tuples
     const calleeNodes = callees.slice(0, limit).map(c => c.node);
-    const formatted = this.formatNodeList(calleeNodes, `Callees of ${symbol}`);
-    return this.textResult(formatted);
+    const formatted = this.formatNodeList(calleeNodes, `Callees of ${symbol}`) + match.note;
+    return this.textResult(this.truncateOutput(formatted));
   }
 
   /**
@@ -493,17 +487,15 @@ export class ToolHandler {
     const symbol = args.symbol as string;
     const depth = clamp((args.depth as number) || 2, 1, 10);
 
-    // First find the node by name
-    const results = cg.searchNodes(symbol, { limit: 1 });
-    if (results.length === 0 || !results[0]) {
+    const match = this.findSymbol(cg, symbol);
+    if (!match) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const node = results[0].node;
-    const impact = cg.getImpactRadius(node.id, depth);
+    const impact = cg.getImpactRadius(match.node.id, depth);
 
-    const formatted = this.formatImpact(symbol, impact);
-    return this.textResult(formatted);
+    const formatted = this.formatImpact(symbol, impact) + match.note;
+    return this.textResult(this.truncateOutput(formatted));
   }
 
   /**
@@ -515,21 +507,19 @@ export class ToolHandler {
     // Default to false to minimize context usage
     const includeCode = args.includeCode === true;
 
-    // Find the node by name
-    const results = cg.searchNodes(symbol, { limit: 1 });
-    if (results.length === 0 || !results[0]) {
+    const match = this.findSymbol(cg, symbol);
+    if (!match) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const node = results[0].node;
     let code: string | null = null;
 
     if (includeCode) {
-      code = await cg.getCode(node.id);
+      code = await cg.getCode(match.node.id);
     }
 
-    const formatted = this.formatNodeDetails(node, code);
-    return this.textResult(formatted);
+    const formatted = this.formatNodeDetails(match.node, code) + match.note;
+    return this.textResult(this.truncateOutput(formatted));
   }
 
   /**
@@ -614,7 +604,7 @@ export class ToolHandler {
         break;
     }
 
-    return this.textResult(output);
+    return this.textResult(this.truncateOutput(output));
   }
 
   /**
@@ -752,6 +742,58 @@ export class ToolHandler {
     renderNode(root, '', true, 0);
 
     return lines.join('\n');
+  }
+
+  // =========================================================================
+  // Symbol resolution helpers
+  // =========================================================================
+
+  /**
+   * Find a symbol by name, handling disambiguation when multiple matches exist.
+   * Returns the best match and a note about alternatives if any.
+   */
+  private findSymbol(cg: CodeGraph, symbol: string): { node: Node; note: string } | null {
+    const results = cg.searchNodes(symbol, { limit: 10 });
+
+    if (results.length === 0 || !results[0]) {
+      return null;
+    }
+
+    // If only one result, or first is an exact name match, use it directly
+    const exactMatches = results.filter(r => r.node.name === symbol);
+
+    if (exactMatches.length === 1) {
+      return { node: exactMatches[0]!.node, note: '' };
+    }
+
+    if (exactMatches.length > 1) {
+      // Multiple exact matches - pick first, note the others
+      const picked = exactMatches[0]!.node;
+      const others = exactMatches.slice(1).map(r =>
+        `${r.node.name} (${r.node.kind}) at ${r.node.filePath}:${r.node.startLine}`
+      );
+      const note = `\n\n> **Note:** ${exactMatches.length} symbols named "${symbol}". Showing results for \`${picked.filePath}:${picked.startLine}\`. Others: ${others.join(', ')}`;
+      return { node: picked, note };
+    }
+
+    // No exact match, use best fuzzy match
+    return { node: results[0]!.node, note: '' };
+  }
+
+  /**
+   * Maximum output length to prevent context bloat (characters)
+   */
+  private readonly MAX_OUTPUT_LENGTH = 15000;
+
+  /**
+   * Truncate output if it exceeds the maximum length
+   */
+  private truncateOutput(text: string): string {
+    if (text.length <= this.MAX_OUTPUT_LENGTH) return text;
+    const truncated = text.slice(0, this.MAX_OUTPUT_LENGTH);
+    const lastNewline = truncated.lastIndexOf('\n');
+    const cutPoint = lastNewline > this.MAX_OUTPUT_LENGTH * 0.8 ? lastNewline : this.MAX_OUTPUT_LENGTH;
+    return truncated.slice(0, cutPoint) + '\n\n... (output truncated)';
   }
 
   // =========================================================================
