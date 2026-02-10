@@ -324,13 +324,14 @@ export class VectorSearchManager {
       const rows = this.db
         .prepare(
           `
-          SELECT
-            vss_map.node_id,
-            vss_vectors.distance
-          FROM vss_vectors
-          JOIN vss_map ON vss_map.rowid = vss_vectors.rowid
-          WHERE vss_search(vss_vectors.embedding, ?)
-          LIMIT ${safeLimit}
+          SELECT m.node_id, v.distance
+          FROM (
+            SELECT rowid, distance
+            FROM vss_vectors
+            WHERE vss_search(embedding, ?)
+            LIMIT ${safeLimit}
+          ) v
+          JOIN vss_map m ON m.rowid = v.rowid
         `
         )
         .all(vectorJson) as Array<{ node_id: string; distance: number }>;

@@ -296,7 +296,7 @@ export class TextEmbedder {
     if (data && typeof data === 'object' && 'length' in data) {
       // Handle TypedArray-like objects
       const arr = data as ArrayLike<number>;
-      return new Float32Array(arr.length);
+      return Float32Array.from(Array.from(arr));
     }
     throw new Error('Unsupported data format for embedding');
   }
