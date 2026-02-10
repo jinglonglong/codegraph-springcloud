@@ -157,14 +157,6 @@ function loadGrammar(language: Language): unknown | null {
 }
 
 /**
- * Get a grammar by language, loading it lazily if needed.
- * Exported for direct grammar access without parser initialization.
- */
-export function getGrammar(language: string): unknown | null {
-  return loadGrammar(language as Language);
-}
-
-/**
  * Get a parser for the specified language
  */
 export function getParser(language: Language): Parser | null {

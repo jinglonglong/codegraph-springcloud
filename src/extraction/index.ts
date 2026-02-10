@@ -487,7 +487,7 @@ export class ExtractionOrchestrator {
       };
     }
 
-    // Check file exists and is readable
+    // Read file content and stats
     let content: string;
     let stats: fs.Stats;
     try {
@@ -509,43 +509,7 @@ export class ExtractionOrchestrator {
       };
     }
 
-    // Check file size
-    if (stats.size > this.config.maxFileSize) {
-      return {
-        nodes: [],
-        edges: [],
-        unresolvedReferences: [],
-        errors: [
-          {
-            message: `File exceeds max size (${stats.size} > ${this.config.maxFileSize})`,
-            severity: 'warning',
-          },
-        ],
-        durationMs: 0,
-      };
-    }
-
-    // Detect language
-    const language = detectLanguage(relativePath);
-    if (!isLanguageSupported(language)) {
-      return {
-        nodes: [],
-        edges: [],
-        unresolvedReferences: [],
-        errors: [],
-        durationMs: 0,
-      };
-    }
-
-    // Extract from source
-    const result = extractFromSource(relativePath, content, language);
-
-    // Store in database
-    if (result.nodes.length > 0 || result.errors.length === 0) {
-      this.storeExtractionResult(relativePath, content, language, stats, result);
-    }
-
-    return result;
+    return this.indexFileWithContent(relativePath, content, stats);
   }
 
   /**

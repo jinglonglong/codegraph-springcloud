@@ -978,14 +978,6 @@ export class TreeSitterExtractor {
     else if (this.extractor.typeAliasTypes.includes(nodeType)) {
       this.extractTypeAlias(node);
     }
-    // Check for arrow functions / function expressions assigned to variables (JS/TS)
-    else if (nodeType === 'variable_declarator') {
-      const valueNode = getChildByField(node, 'value');
-      if (valueNode && (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression')) {
-        this.extractFunctionVariable(node);
-        skipChildren = true;
-      }
-    }
     // Check for variable declarations (const, let, var, etc.)
     // Only extract top-level variables (not inside functions/methods)
     else if (this.extractor.variableTypes.includes(nodeType) && !this.isInsideClassLikeNode()) {
@@ -1107,62 +1099,6 @@ export class TreeSitterExtractor {
       parentNode.kind === 'trait' ||
       parentNode.kind === 'enum'
     );
-  }
-
-  /**
-   * Extract an arrow function or function expression assigned to a variable.
-   * Handles patterns like: const foo = () => {} or const bar = function() {}
-   */
-  private extractFunctionVariable(node: SyntaxNode): void {
-    if (!this.extractor) return;
-
-    // Only handle variable_declarator where value is arrow_function or function_expression
-    if (node.type !== 'variable_declarator') return;
-
-    const nameNode = getChildByField(node, 'name');
-    const valueNode = getChildByField(node, 'value');
-
-    if (!nameNode || !valueNode) return;
-    if (valueNode.type !== 'arrow_function' && valueNode.type !== 'function_expression') return;
-
-    const name = getNodeText(nameNode, this.source);
-    if (!name) return;
-
-    // Check if exported by walking parents
-    let isExported = false;
-    let current = node.parent;
-    while (current) {
-      if (current.type === 'export_statement') {
-        isExported = true;
-        break;
-      }
-      if (current.type === 'program' || current.type === 'module') break;
-      current = current.parent;
-    }
-
-    // Build signature from the arrow function parameters
-    let signature: string | undefined;
-    const params = getChildByField(valueNode, 'parameters');
-    if (params) {
-      signature = `${name}${getNodeText(params, this.source)}`;
-    }
-
-    // Check if async
-    const isAsync = this.extractor.isAsync?.(valueNode);
-
-    const funcNode = this.createNode('function', name, node, {
-      isExported,
-      signature: signature || undefined,
-      isAsync,
-    });
-
-    // Push to stack and visit body for call extraction
-    this.nodeStack.push(funcNode.id);
-    const body = getChildByField(valueNode, this.extractor.bodyField);
-    if (body) {
-      this.visitFunctionBody(body, funcNode.id);
-    }
-    this.nodeStack.pop();
   }
 
   /**

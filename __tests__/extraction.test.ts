@@ -524,45 +524,6 @@ export function bar() {}
   });
 });
 
-describe('Arrow Function Variable Extraction', () => {
-  it('should extract const arrow functions as function nodes', () => {
-    const code = `
-const handleClick = () => {
-  console.log('clicked');
-};
-`;
-    const result = extractFromSource('handler.ts', code);
-
-    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'handleClick');
-    expect(funcNode).toBeDefined();
-    expect(funcNode?.kind).toBe('function');
-  });
-
-  it('should detect async arrow functions', () => {
-    const code = `
-export const fetchUser = async (id: string) => {
-  return await db.find(id);
-};
-`;
-    const result = extractFromSource('api.ts', code);
-
-    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'fetchUser');
-    expect(funcNode).toBeDefined();
-    expect(funcNode?.isExported).toBe(true);
-  });
-
-  it('should not create duplicate nodes for arrow functions in export statements', () => {
-    const code = `
-export const compute = (x: number) => x * 2;
-`;
-    const result = extractFromSource('math.ts', code);
-
-    const funcNodes = result.nodes.filter((n) => n.kind === 'function' && n.name === 'compute');
-    // Should appear only once, not duplicated between extractFunctionVariable and extractFunction
-    expect(funcNodes).toHaveLength(1);
-  });
-});
-
 describe('Python Extraction', () => {
   it('should extract function definitions', () => {
     const code = `
