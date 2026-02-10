@@ -336,9 +336,6 @@ export interface SearchOptions {
 
   /** Whether search is case-sensitive */
   caseSensitive?: boolean;
-
-  /** Search intent for biasing results */
-  intent?: 'api' | 'general';
 }
 
 /**

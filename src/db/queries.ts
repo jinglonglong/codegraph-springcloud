@@ -173,28 +173,8 @@ export class QueryBuilder {
     getUnresolvedByName?: Database.Statement;
   } = {};
 
-  // Cache for dynamically-built prepared statements keyed by SQL shape.
-  private dynamicStmtCache = new Map<string, Database.Statement>();
-  private readonly maxDynamicStmtCacheSize = 50;
-
   constructor(db: Database.Database) {
     this.db = db;
-  }
-
-  /**
-   * Get or create a cached prepared statement for dynamically-built SQL.
-   */
-  private getDynamicStmt(cacheKey: string, sql: string): Database.Statement {
-    let stmt = this.dynamicStmtCache.get(cacheKey);
-    if (stmt) return stmt;
-
-    if (this.dynamicStmtCache.size >= this.maxDynamicStmtCacheSize) {
-      this.dynamicStmtCache.clear();
-    }
-
-    stmt = this.db.prepare(sql);
-    this.dynamicStmtCache.set(cacheKey, stmt);
-    return stmt;
   }
 
   // ===========================================================================
@@ -416,11 +396,10 @@ export class QueryBuilder {
   }
 
   /**
-   * Clear the node cache and dynamic statement cache
+   * Clear the node cache
    */
   clearCache(): void {
     this.nodeCache.clear();
-    this.dynamicStmtCache.clear();
   }
 
   /**
@@ -453,56 +432,6 @@ export class QueryBuilder {
   getAllNodes(): Node[] {
     const rows = this.db.prepare('SELECT * FROM nodes').all() as NodeRow[];
     return rows.map(rowToNode);
-  }
-
-  /**
-   * Get all nodes matching any of the given kinds in a single query
-   */
-  getNodesByKinds(kinds: NodeKind[]): Node[] {
-    if (kinds.length === 0) return [];
-    const placeholders = kinds.map(() => '?').join(',');
-    const sql = `SELECT * FROM nodes WHERE kind IN (${placeholders})`;
-    const cacheKey = `nodesByKinds:${kinds.length}`;
-    const stmt = this.getDynamicStmt(cacheKey, sql);
-    const rows = stmt.all(...kinds) as NodeRow[];
-    return rows.map(rowToNode);
-  }
-
-  /**
-   * Get multiple nodes by their IDs in a single batch query
-   */
-  getNodesByIds(ids: string[]): Map<string, Node> {
-    const result = new Map<string, Node>();
-    if (ids.length === 0) return result;
-
-    const missing: string[] = [];
-    for (const id of ids) {
-      if (this.nodeCache.has(id)) {
-        const cached = this.nodeCache.get(id)!;
-        // LRU touch
-        this.nodeCache.delete(id);
-        this.nodeCache.set(id, cached);
-        result.set(id, cached);
-      } else {
-        missing.push(id);
-      }
-    }
-
-    // Batch fetch missing nodes, chunking at 999 params (SQLite limit)
-    const CHUNK_SIZE = 999;
-    for (let i = 0; i < missing.length; i += CHUNK_SIZE) {
-      const chunk = missing.slice(i, i + CHUNK_SIZE);
-      const placeholders = chunk.map(() => '?').join(',');
-      const sql = `SELECT * FROM nodes WHERE id IN (${placeholders})`;
-      const rows = this.db.prepare(sql).all(...chunk) as NodeRow[];
-      for (const row of rows) {
-        const node = rowToNode(row);
-        this.cacheNode(node);
-        result.set(node.id, node);
-      }
-    }
-
-    return result;
   }
 
   /**
@@ -854,75 +783,14 @@ export class QueryBuilder {
   }
 
   /**
-   * Get files that need re-indexing (hash changed).
-   *
-   * Uses a temporary table + JOIN so the filtering happens entirely in SQL
-   * instead of loading every FileRecord into JS and comparing in a loop.
+   * Get files that need re-indexing (hash changed)
    */
   getStaleFiles(currentHashes: Map<string, string>): FileRecord[] {
-    if (currentHashes.size === 0) return [];
-
-    this.db.exec(`
-      CREATE TEMP TABLE IF NOT EXISTS _current_hashes (
-        path TEXT PRIMARY KEY,
-        content_hash TEXT NOT NULL
-      )
-    `);
-    this.db.exec('DELETE FROM _current_hashes');
-
-    const insertHash = this.db.prepare(
-      'INSERT INTO _current_hashes (path, content_hash) VALUES (?, ?)'
-    );
-    this.db.transaction(() => {
-      for (const [filePath, hash] of currentHashes) {
-        insertHash.run(filePath, hash);
-      }
-    })();
-
-    const rows = this.db.prepare(`
-      SELECT f.*
-      FROM files f
-      INNER JOIN _current_hashes ch ON f.path = ch.path
-      WHERE f.content_hash != ch.content_hash
-    `).all() as FileRow[];
-
-    this.db.exec('DELETE FROM _current_hashes');
-
-    return rows.map(rowToFileRecord);
-  }
-
-  /**
-   * Get a lightweight map of tracked file paths to their content hashes.
-   */
-  getFileHashMap(): Map<string, string> {
-    const rows = this.db.prepare(
-      'SELECT path, content_hash FROM files'
-    ).all() as Array<{ path: string; content_hash: string }>;
-
-    const map = new Map<string, string>();
-    for (const row of rows) {
-      map.set(row.path, row.content_hash);
-    }
-    return map;
-  }
-
-  /**
-   * Get a lightweight map of tracked file paths to mtime + size + hash.
-   */
-  getFileSyncMap(): Map<string, { contentHash: string; modifiedAt: number; size: number }> {
-    const rows = this.db.prepare(
-      'SELECT path, content_hash, modified_at, size FROM files'
-    ).all() as Array<{ path: string; content_hash: string; modified_at: number; size: number }>;
-
-    const map = new Map<string, { contentHash: string; modifiedAt: number; size: number }>();
-    for (const row of rows) {
-      map.set(row.path, {
-        contentHash: row.content_hash,
-        modifiedAt: row.modified_at,
-        size: row.size,
-      });
-    }
-    return map;
+    const files = this.getAllFiles();
+    return files.filter((f) => {
+      const currentHash = currentHashes.get(f.path);
+      return currentHash && currentHash !== f.contentHash;
+    });
   }
 
   // ===========================================================================
