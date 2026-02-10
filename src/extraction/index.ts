@@ -18,9 +18,15 @@ import {
 import { QueryBuilder } from '../db/queries';
 import { extractFromSource } from './tree-sitter';
 import { detectLanguage, isLanguageSupported } from './grammars';
-import { logDebug } from '../errors';
+import { logDebug, logWarn } from '../errors';
 import { captureException } from '../sentry';
 import { validatePathWithinRoot } from '../utils';
+
+/**
+ * Number of files to read in parallel during indexing.
+ * File reads are I/O-bound; batching overlaps I/O wait with CPU parse work.
+ */
+const FILE_IO_BATCH_SIZE = 10;
 
 /**
  * Progress callback for indexing operations
@@ -129,21 +135,24 @@ export function scanDirectory(
 ): string[] {
   const files: string[] = [];
   let count = 0;
-  const visitedRealPaths = new Set<string>(); // Symlink cycle detection
+  // Track visited real paths to detect symlink cycles
+  const visitedDirs = new Set<string>();
 
   function walk(dir: string): void {
-    // Symlink cycle detection: resolve real path and skip if already visited
+    // Resolve real path to detect symlink cycles
+    let realDir: string;
     try {
-      const realDir = fs.realpathSync(dir);
-      if (visitedRealPaths.has(realDir)) {
-        logDebug('Skipping directory to prevent symlink cycle', { dir, realDir });
-        return;
-      }
-      visitedRealPaths.add(realDir);
+      realDir = fs.realpathSync(dir);
     } catch {
-      // If realpath fails, skip this directory
+      logDebug('Skipping unresolvable directory', { dir });
       return;
     }
+
+    if (visitedDirs.has(realDir)) {
+      logDebug('Skipping already-visited directory (symlink cycle)', { dir, realDir });
+      return;
+    }
+    visitedDirs.add(realDir);
 
     // Check for .codegraphignore marker file - skip entire directory tree if present
     const ignoreMarker = path.join(dir, CODEGRAPH_IGNORE_MARKER);
@@ -283,10 +292,11 @@ export class ExtractionOrchestrator {
       };
     }
 
-    // Phase 2: Parse files
+    // Phase 2: Parse files (read in parallel batches, parse/store sequentially)
     const total = files.length;
+    let processed = 0;
 
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < files.length; i += FILE_IO_BATCH_SIZE) {
       if (signal?.aborted) {
         return {
           success: false,
@@ -299,26 +309,69 @@ export class ExtractionOrchestrator {
         };
       }
 
-      const filePath = files[i]!;
-      onProgress?.({
-        phase: 'parsing',
-        current: i + 1,
-        total,
-        currentFile: filePath,
-      });
+      const batch = files.slice(i, i + FILE_IO_BATCH_SIZE);
 
-      const result = await this.indexFile(filePath);
+      // Read files in parallel (with path validation before any I/O)
+      const fileContents = await Promise.all(
+        batch.map(async (fp) => {
+          try {
+            const fullPath = validatePathWithinRoot(this.rootDir, fp);
+            if (!fullPath) {
+              logWarn('Path traversal blocked in batch reader', { filePath: fp });
+              return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: new Error('Path traversal blocked') };
+            }
+            const content = await fsp.readFile(fullPath, 'utf-8');
+            const stats = await fsp.stat(fullPath);
+            return { filePath: fp, content, stats, error: null as Error | null };
+          } catch (err) {
+            return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: err as Error };
+          }
+        })
+      );
 
-      if (result.errors.length > 0) {
-        errors.push(...result.errors);
-      }
+      // Parse and store sequentially
+      for (const { filePath, content, stats, error } of fileContents) {
+        if (signal?.aborted) {
+          return {
+            success: false,
+            filesIndexed,
+            filesSkipped,
+            nodesCreated: totalNodes,
+            edgesCreated: totalEdges,
+            errors: [{ message: 'Aborted', severity: 'error' }, ...errors],
+            durationMs: Date.now() - startTime,
+          };
+        }
 
-      if (result.nodes.length > 0) {
-        filesIndexed++;
-        totalNodes += result.nodes.length;
-        totalEdges += result.edges.length;
-      } else if (result.errors.length === 0) {
-        filesSkipped++;
+        processed++;
+        onProgress?.({
+          phase: 'parsing',
+          current: processed,
+          total,
+          currentFile: filePath,
+        });
+
+        if (error || content === null || stats === null) {
+          errors.push({
+            message: `Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+            severity: 'error',
+          });
+          continue;
+        }
+
+        const result = await this.indexFileWithContent(filePath, content, stats);
+
+        if (result.errors.length > 0) {
+          errors.push(...result.errors);
+        }
+
+        if (result.nodes.length > 0) {
+          filesIndexed++;
+          totalNodes += result.nodes.length;
+          totalEdges += result.edges.length;
+        } else if (result.errors.length === 0) {
+          filesSkipped++;
+        }
       }
     }
 
@@ -414,6 +467,67 @@ export class ExtractionOrchestrator {
             severity: 'error',
           },
         ],
+        durationMs: 0,
+      };
+    }
+
+    // Check file size
+    if (stats.size > this.config.maxFileSize) {
+      return {
+        nodes: [],
+        edges: [],
+        unresolvedReferences: [],
+        errors: [
+          {
+            message: `File exceeds max size (${stats.size} > ${this.config.maxFileSize})`,
+            severity: 'warning',
+          },
+        ],
+        durationMs: 0,
+      };
+    }
+
+    // Detect language
+    const language = detectLanguage(relativePath);
+    if (!isLanguageSupported(language)) {
+      return {
+        nodes: [],
+        edges: [],
+        unresolvedReferences: [],
+        errors: [],
+        durationMs: 0,
+      };
+    }
+
+    // Extract from source
+    const result = extractFromSource(relativePath, content, language);
+
+    // Store in database
+    if (result.nodes.length > 0 || result.errors.length === 0) {
+      this.storeExtractionResult(relativePath, content, language, stats, result);
+    }
+
+    return result;
+  }
+
+  /**
+   * Index a single file with pre-read content and stats.
+   * Used by the parallel batch reader to avoid redundant file I/O.
+   */
+  async indexFileWithContent(
+    relativePath: string,
+    content: string,
+    stats: fs.Stats
+  ): Promise<ExtractionResult> {
+    // Prevent path traversal
+    const fullPath = validatePathWithinRoot(this.rootDir, relativePath);
+    if (!fullPath) {
+      logWarn('Path traversal blocked in indexFileWithContent', { relativePath });
+      return {
+        nodes: [],
+        edges: [],
+        unresolvedReferences: [],
+        errors: [{ message: 'Path traversal blocked', severity: 'error' }],
         durationMs: 0,
       };
     }

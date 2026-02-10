@@ -127,14 +127,19 @@ export function processPayment(amount: number): Promise<Receipt> {
 `;
     const result = extractFromSource('payment.ts', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    // File node + function node
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('payment.ts');
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function');
+    expect(funcNode).toMatchObject({
       kind: 'function',
       name: 'processPayment',
       language: 'typescript',
       isExported: true,
     });
-    expect(result.nodes[0]?.signature).toContain('amount: number');
+    expect(funcNode?.signature).toContain('amount: number');
   });
 
   it('should extract class declarations', () => {
@@ -175,8 +180,11 @@ export interface User {
 `;
     const result = extractFromSource('types.ts', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+
+    const ifaceNode = result.nodes.find((n) => n.kind === 'interface');
+    expect(ifaceNode).toMatchObject({
       kind: 'interface',
       name: 'User',
       isExported: true,
@@ -207,8 +215,9 @@ export const useAuth = (): AuthContextValue => {
 `;
     const result = extractFromSource('hooks.ts', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'useAuth');
+    expect(funcNode).toBeDefined();
+    expect(funcNode).toMatchObject({
       kind: 'function',
       name: 'useAuth',
       isExported: true,
@@ -223,8 +232,9 @@ export const processData = function(input: string): string {
 `;
     const result = extractFromSource('utils.ts', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'processData');
+    expect(funcNode).toBeDefined();
+    expect(funcNode).toMatchObject({
       kind: 'function',
       name: 'processData',
       isExported: true,
@@ -286,8 +296,9 @@ export const fetchData = async () => {
 `;
     const result = extractFromSource('api.js', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'fetchData');
+    expect(funcNode).toBeDefined();
+    expect(funcNode).toMatchObject({
       kind: 'function',
       name: 'fetchData',
       isExported: true,
@@ -306,8 +317,8 @@ export type AuthContextValue = {
 `;
     const result = extractFromSource('types.ts', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const typeNode = result.nodes.find((n) => n.kind === 'type_alias');
+    expect(typeNode).toMatchObject({
       kind: 'type_alias',
       name: 'AuthContextValue',
       isExported: true,
@@ -323,8 +334,8 @@ type InternalState = {
 `;
     const result = extractFromSource('internal.ts', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const typeNode = result.nodes.find((n) => n.kind === 'type_alias');
+    expect(typeNode).toMatchObject({
       kind: 'type_alias',
       name: 'InternalState',
       isExported: false,
@@ -415,7 +426,7 @@ export const useAuth = () => {
     expect(varNodes).toHaveLength(0);
   });
 
-  it('should not extract non-exported const as exported variable', () => {
+  it('should extract non-exported const as non-exported variable', () => {
     const code = `
 const internalConfig = {
   debug: true,
@@ -423,10 +434,10 @@ const internalConfig = {
 `;
     const result = extractFromSource('internal.ts', code);
 
-    // Non-exported const should NOT create a variable node
-    // (only export_statement triggers extractExportedVariables)
-    const varNodes = result.nodes.filter((n) => n.kind === 'variable' && n.name === 'internalConfig');
-    expect(varNodes).toHaveLength(0);
+    // Non-exported const at file level should be extracted as a constant (not exported)
+    const varNodes = result.nodes.filter((n) => (n.kind === 'variable' || n.kind === 'constant') && n.name === 'internalConfig');
+    expect(varNodes).toHaveLength(1);
+    expect(varNodes[0]?.isExported).toBeFalsy();
   });
 
   it('should extract Zod schema exports', () => {
@@ -463,6 +474,93 @@ export const authMachine = createMachine({
   });
 });
 
+describe('File Node Extraction', () => {
+  it('should create a file-kind node for each parsed file', () => {
+    const code = `
+export function greet(name: string): string {
+  return "Hello " + name;
+}
+`;
+    const result = extractFromSource('greeter.ts', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('greeter.ts');
+    expect(fileNode?.filePath).toBe('greeter.ts');
+    expect(fileNode?.language).toBe('typescript');
+    expect(fileNode?.startLine).toBe(1);
+  });
+
+  it('should create file nodes for Python files', () => {
+    const code = `
+def main():
+    pass
+`;
+    const result = extractFromSource('main.py', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+    expect(fileNode?.name).toBe('main.py');
+    expect(fileNode?.language).toBe('python');
+  });
+
+  it('should create containment edges from file node to top-level declarations', () => {
+    const code = `
+export function foo() {}
+export function bar() {}
+`;
+    const result = extractFromSource('fns.ts', code);
+
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+
+    // There should be contains edges from the file node to each function
+    const containsEdges = result.edges.filter(
+      (e) => e.source === fileNode?.id && e.kind === 'contains'
+    );
+    expect(containsEdges.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('Arrow Function Variable Extraction', () => {
+  it('should extract const arrow functions as function nodes', () => {
+    const code = `
+const handleClick = () => {
+  console.log('clicked');
+};
+`;
+    const result = extractFromSource('handler.ts', code);
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'handleClick');
+    expect(funcNode).toBeDefined();
+    expect(funcNode?.kind).toBe('function');
+  });
+
+  it('should detect async arrow functions', () => {
+    const code = `
+export const fetchUser = async (id: string) => {
+  return await db.find(id);
+};
+`;
+    const result = extractFromSource('api.ts', code);
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function' && n.name === 'fetchUser');
+    expect(funcNode).toBeDefined();
+    expect(funcNode?.isExported).toBe(true);
+  });
+
+  it('should not create duplicate nodes for arrow functions in export statements', () => {
+    const code = `
+export const compute = (x: number) => x * 2;
+`;
+    const result = extractFromSource('math.ts', code);
+
+    const funcNodes = result.nodes.filter((n) => n.kind === 'function' && n.name === 'compute');
+    // Should appear only once, not duplicated between extractFunctionVariable and extractFunction
+    expect(funcNodes).toHaveLength(1);
+  });
+});
+
 describe('Python Extraction', () => {
   it('should extract function definitions', () => {
     const code = `
@@ -473,8 +571,11 @@ def calculate_total(items: list, tax_rate: float) -> float:
 `;
     const result = extractFromSource('calc.py', code);
 
-    expect(result.nodes).toHaveLength(1);
-    expect(result.nodes[0]).toMatchObject({
+    const fileNode = result.nodes.find((n) => n.kind === 'file');
+    expect(fileNode).toBeDefined();
+
+    const funcNode = result.nodes.find((n) => n.kind === 'function');
+    expect(funcNode).toMatchObject({
       kind: 'function',
       name: 'calculate_total',
       language: 'python',
