@@ -185,7 +185,7 @@ export class QueryBuilder {
   insertNode(node: Node): void {
     if (!this.stmts.insertNode) {
       this.stmts.insertNode = this.db.prepare(`
-        INSERT INTO nodes (
+        INSERT OR REPLACE INTO nodes (
           id, kind, name, qualified_name, file_path, language,
           start_line, end_line, start_column, end_column,
           docstring, signature, visibility,
@@ -627,7 +627,7 @@ export class QueryBuilder {
   insertEdge(edge: Edge): void {
     if (!this.stmts.insertEdge) {
       this.stmts.insertEdge = this.db.prepare(`
-        INSERT INTO edges (source, target, kind, metadata, line, col)
+        INSERT OR IGNORE INTO edges (source, target, kind, metadata, line, col)
         VALUES (@source, @target, @kind, @metadata, @line, @col)
       `);
     }
