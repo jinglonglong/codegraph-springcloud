@@ -1,6 +1,6 @@
 {
   "name": "@colbymchenry/codegraph",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Supercharge Claude Code with semantic code intelligence. 30% fewer tokens, 25% fewer tool calls, 100% local.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -48,7 +48,7 @@
   },
   "optionalDependencies": {
     "sqlite-vss": "^0.1.2",
-    "tree-sitter-c": "0.23.4",
+    "tree-sitter-c": "0.24.1",
     "tree-sitter-c-sharp": "0.23.1",
     "tree-sitter-cpp": "0.23.4",
     "@sengac/tree-sitter-dart": "1.1.6",
@@ -56,10 +56,10 @@
     "tree-sitter-java": "0.23.5",
     "tree-sitter-javascript": "0.23.1",
     "tree-sitter-kotlin": "0.3.8",
-    "tree-sitter-php": "0.23.11",
+    "tree-sitter-php": "0.24.2",
     "tree-sitter-python": "0.23.6",
     "tree-sitter-ruby": "0.23.1",
-    "tree-sitter-rust": "0.23.2",
+    "tree-sitter-rust": "0.24.0",
     "tree-sitter-swift": "0.7.1",
     "tree-sitter-typescript": "0.23.2"
   },
