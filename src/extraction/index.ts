@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import {
   Language,
   FileRecord,
@@ -18,9 +19,16 @@ import {
 import { QueryBuilder } from '../db/queries';
 import { extractFromSource } from './tree-sitter';
 import { detectLanguage, isLanguageSupported } from './grammars';
-import { logDebug } from '../errors';
+import { logDebug, logWarn } from '../errors';
 import { captureException } from '../sentry';
-import { validatePathWithinRoot } from '../utils';
+import { validatePathWithinRoot, normalizePath } from '../utils';
+import picomatch from 'picomatch';
+
+/**
+ * Number of files to read in parallel during indexing.
+ * File reads are I/O-bound; batching overlaps I/O wait with CPU parse work.
+ */
+const FILE_IO_BATCH_SIZE = 10;
 
 /**
  * Progress callback for indexing operations
@@ -68,7 +76,7 @@ export function hashContent(content: string): string {
  * Check if a path matches any glob pattern (simplified)
  */
 function matchesGlob(filePath: string, pattern: string): boolean {
-  const picomatch = require('picomatch');
+  filePath = normalizePath(filePath);
   return picomatch.isMatch(filePath, pattern, { dot: true });
 }
 
@@ -97,6 +105,31 @@ export function shouldIncludeFile(
 }
 
 /**
+ * Get directories ignored by .gitignore using git ls-files.
+ * Returns a Set of normalized relative directory paths (forward slashes, no trailing slash).
+ * Gracefully returns empty Set on any failure.
+ */
+function getGitIgnoredDirectories(rootDir: string): Set<string> {
+  try {
+    const output = execFileSync(
+      'git',
+      ['ls-files', '-oi', '--exclude-standard', '--directory'],
+      { cwd: rootDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    const dirs = new Set<string>();
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed.endsWith('/')) {
+        dirs.add(normalizePath(trimmed.slice(0, -1)));
+      }
+    }
+    return dirs;
+  } catch {
+    return new Set<string>();
+  }
+}
+
+/**
  * Marker file name that indicates a directory (and all children) should be skipped
  */
 const CODEGRAPH_IGNORE_MARKER = '.codegraphignore';
@@ -111,21 +144,25 @@ export function scanDirectory(
 ): string[] {
   const files: string[] = [];
   let count = 0;
-  const visitedRealPaths = new Set<string>(); // Symlink cycle detection
+  // Track visited real paths to detect symlink cycles
+  const visitedDirs = new Set<string>();
+  const gitIgnoredDirs = getGitIgnoredDirectories(rootDir);
 
   function walk(dir: string): void {
-    // Symlink cycle detection: resolve real path and skip if already visited
+    // Resolve real path to detect symlink cycles
+    let realDir: string;
     try {
-      const realDir = fs.realpathSync(dir);
-      if (visitedRealPaths.has(realDir)) {
-        logDebug('Skipping directory to prevent symlink cycle', { dir, realDir });
-        return;
-      }
-      visitedRealPaths.add(realDir);
+      realDir = fs.realpathSync(dir);
     } catch {
-      // If realpath fails, skip this directory
+      logDebug('Skipping unresolvable directory', { dir });
       return;
     }
+
+    if (visitedDirs.has(realDir)) {
+      logDebug('Skipping already-visited directory (symlink cycle)', { dir, realDir });
+      return;
+    }
+    visitedDirs.add(realDir);
 
     // Check for .codegraphignore marker file - skip entire directory tree if present
     const ignoreMarker = path.join(dir, CODEGRAPH_IGNORE_MARKER);
@@ -145,7 +182,7 @@ export function scanDirectory(
 
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      const relativePath = path.relative(rootDir, fullPath);
+      const relativePath = normalizePath(path.relative(rootDir, fullPath));
 
       // Follow symlinked directories, but skip symlinked files to non-project targets
       if (entry.isSymbolicLink()) {
@@ -153,6 +190,10 @@ export function scanDirectory(
           const realTarget = fs.realpathSync(fullPath);
           const stat = fs.statSync(realTarget);
           if (stat.isDirectory()) {
+            // Check gitignore first (fast O(1) lookup)
+            if (gitIgnoredDirs.has(relativePath)) {
+              continue;
+            }
             // Check exclusion, then recurse (cycle detection handles the rest)
             const dirPattern = relativePath + '/';
             let excluded = false;
@@ -181,6 +222,10 @@ export function scanDirectory(
       }
 
       if (entry.isDirectory()) {
+        // Check gitignore first (fast O(1) lookup)
+        if (gitIgnoredDirs.has(relativePath)) {
+          continue;
+        }
         // Check if directory should be excluded
         const dirPattern = relativePath + '/';
         let excluded = false;
@@ -265,10 +310,11 @@ export class ExtractionOrchestrator {
       };
     }
 
-    // Phase 2: Parse files
+    // Phase 2: Parse files (read in parallel batches, parse/store sequentially)
     const total = files.length;
+    let processed = 0;
 
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < files.length; i += FILE_IO_BATCH_SIZE) {
       if (signal?.aborted) {
         return {
           success: false,
@@ -281,26 +327,69 @@ export class ExtractionOrchestrator {
         };
       }
 
-      const filePath = files[i]!;
-      onProgress?.({
-        phase: 'parsing',
-        current: i + 1,
-        total,
-        currentFile: filePath,
-      });
+      const batch = files.slice(i, i + FILE_IO_BATCH_SIZE);
 
-      const result = await this.indexFile(filePath);
+      // Read files in parallel (with path validation before any I/O)
+      const fileContents = await Promise.all(
+        batch.map(async (fp) => {
+          try {
+            const fullPath = validatePathWithinRoot(this.rootDir, fp);
+            if (!fullPath) {
+              logWarn('Path traversal blocked in batch reader', { filePath: fp });
+              return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: new Error('Path traversal blocked') };
+            }
+            const content = await fsp.readFile(fullPath, 'utf-8');
+            const stats = await fsp.stat(fullPath);
+            return { filePath: fp, content, stats, error: null as Error | null };
+          } catch (err) {
+            return { filePath: fp, content: null as string | null, stats: null as fs.Stats | null, error: err as Error };
+          }
+        })
+      );
 
-      if (result.errors.length > 0) {
-        errors.push(...result.errors);
-      }
+      // Parse and store sequentially
+      for (const { filePath, content, stats, error } of fileContents) {
+        if (signal?.aborted) {
+          return {
+            success: false,
+            filesIndexed,
+            filesSkipped,
+            nodesCreated: totalNodes,
+            edgesCreated: totalEdges,
+            errors: [{ message: 'Aborted', severity: 'error' }, ...errors],
+            durationMs: Date.now() - startTime,
+          };
+        }
 
-      if (result.nodes.length > 0) {
-        filesIndexed++;
-        totalNodes += result.nodes.length;
-        totalEdges += result.edges.length;
-      } else if (result.errors.length === 0) {
-        filesSkipped++;
+        processed++;
+        onProgress?.({
+          phase: 'parsing',
+          current: processed,
+          total,
+          currentFile: filePath,
+        });
+
+        if (error || content === null || stats === null) {
+          errors.push({
+            message: `Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+            severity: 'error',
+          });
+          continue;
+        }
+
+        const result = await this.indexFileWithContent(filePath, content, stats);
+
+        if (result.errors.length > 0) {
+          errors.push(...result.errors);
+        }
+
+        if (result.nodes.length > 0) {
+          filesIndexed++;
+          totalNodes += result.nodes.length;
+          totalEdges += result.edges.length;
+        } else if (result.errors.length === 0) {
+          filesSkipped++;
+        }
       }
     }
 
@@ -378,7 +467,7 @@ export class ExtractionOrchestrator {
       };
     }
 
-    // Check file exists and is readable
+    // Read file content and stats
     let content: string;
     let stats: fs.Stats;
     try {
@@ -396,6 +485,31 @@ export class ExtractionOrchestrator {
             severity: 'error',
           },
         ],
+        durationMs: 0,
+      };
+    }
+
+    return this.indexFileWithContent(relativePath, content, stats);
+  }
+
+  /**
+   * Index a single file with pre-read content and stats.
+   * Used by the parallel batch reader to avoid redundant file I/O.
+   */
+  async indexFileWithContent(
+    relativePath: string,
+    content: string,
+    stats: fs.Stats
+  ): Promise<ExtractionResult> {
+    // Prevent path traversal
+    const fullPath = validatePathWithinRoot(this.rootDir, relativePath);
+    if (!fullPath) {
+      logWarn('Path traversal blocked in indexFileWithContent', { relativePath });
+      return {
+        nodes: [],
+        edges: [],
+        unresolvedReferences: [],
+        errors: [{ message: 'Path traversal blocked', severity: 'error' }],
         durationMs: 0,
       };
     }
