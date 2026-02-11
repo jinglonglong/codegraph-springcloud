@@ -197,39 +197,20 @@ export function matchFuzzy(
   ref: UnresolvedRef,
   context: ResolutionContext
 ): ResolvedRef | null {
-  // Try case-insensitive match
-  const allNodes = [
-    ...context.getNodesByKind('function'),
-    ...context.getNodesByKind('method'),
-    ...context.getNodesByKind('class'),
-  ];
-
   const lowerName = ref.referenceName.toLowerCase();
 
-  // Exact case-insensitive match
-  const caseInsensitive = allNodes.filter(
-    (n) => n.name.toLowerCase() === lowerName
-  );
+  // Use pre-built lowercase index for O(1) lookup instead of scanning all nodes
+  const candidates = context.getNodesByLowerName(lowerName);
 
-  if (caseInsensitive.length === 1) {
+  // Filter to callable kinds only (function, method, class)
+  const callableKinds = new Set(['function', 'method', 'class']);
+  const callableCandidates = candidates.filter((n) => callableKinds.has(n.kind));
+
+  if (callableCandidates.length === 1) {
     return {
       original: ref,
-      targetNodeId: caseInsensitive[0]!.id,
+      targetNodeId: callableCandidates[0]!.id,
       confidence: 0.5,
-      resolvedBy: 'fuzzy',
-    };
-  }
-
-  // Try prefix match (e.g., "get" matches "getUser")
-  const prefixMatches = allNodes.filter((n) =>
-    n.name.toLowerCase().startsWith(lowerName)
-  );
-
-  if (prefixMatches.length === 1) {
-    return {
-      original: ref,
-      targetNodeId: prefixMatches[0]!.id,
-      confidence: 0.3,
       resolvedBy: 'fuzzy',
     };
   }
