@@ -1850,6 +1850,16 @@ describe('Pascal / Delphi Extraction', () => {
       expect(moduleNode).toBeDefined();
       expect(moduleNode?.name).toBe('MyApp');
     });
+
+    it('should fallback to filename when module name is empty', () => {
+      // Some .dpr templates use "program;" without a name
+      const code = `program;\nuses SysUtils;\nbegin\nend.`;
+      const result = extractFromSource('Console.dpr', code);
+
+      const moduleNode = result.nodes.find((n) => n.kind === 'module');
+      expect(moduleNode).toBeDefined();
+      expect(moduleNode?.name).toBe('Console');
+    });
   });
 
   describe('Uses clause (imports)', () => {

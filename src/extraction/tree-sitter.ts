@@ -2056,10 +2056,10 @@ export class TreeSitterExtractor {
       const moduleNameNode = node.namedChildren.find(
         (c: SyntaxNode) => c.type === 'moduleName'
       );
-      if (moduleNameNode) {
-        const name = getNodeText(moduleNameNode, this.source);
-        this.createNode('module', name, node);
-      }
+      const name = moduleNameNode ? getNodeText(moduleNameNode, this.source) : '';
+      // Fallback to filename without extension if module name is empty
+      const moduleName = name || path.basename(this.filePath).replace(/\.[^.]+$/, '');
+      this.createNode('module', moduleName, node);
       // Continue visiting children (interface/implementation sections)
       for (let i = 0; i < node.namedChildCount; i++) {
         const child = node.namedChild(i);
