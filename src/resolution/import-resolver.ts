@@ -432,13 +432,11 @@ export function resolveViaImport(
   ref: UnresolvedRef,
   context: ResolutionContext
 ): ResolvedRef | null {
-  // Read the source file to extract imports
-  const content = context.readFile(ref.filePath);
-  if (!content) {
+  // Use cached import mappings (avoids re-reading and re-parsing per ref)
+  const imports = context.getImportMappings(ref.filePath, ref.language);
+  if (imports.length === 0 && !context.readFile(ref.filePath)) {
     return null;
   }
-
-  const imports = extractImportMappings(ref.filePath, content, ref.language);
 
   // Check if the reference name matches any import
   for (const imp of imports) {

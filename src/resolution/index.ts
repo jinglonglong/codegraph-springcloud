@@ -15,9 +15,10 @@ import {
   ResolutionResult,
   ResolutionContext,
   FrameworkResolver,
+  ImportMapping,
 } from './types';
 import { matchReference } from './name-matcher';
-import { resolveViaImport } from './import-resolver';
+import { resolveViaImport, extractImportMappings } from './import-resolver';
 import { detectFrameworks } from './frameworks';
 import { logDebug } from '../errors';
 
@@ -39,6 +40,10 @@ export class ReferenceResolver {
   private nameCache: Map<string, Node[]> = new Map();
   private qualifiedNameCache: Map<string, Node[]> = new Map();
   private nodeByIdCache: Map<string, Node> = new Map();
+  private kindCache: Map<string, Node[]> = new Map();
+  private lowerNameCache: Map<string, Node[]> = new Map();
+  private importMappingCache: Map<string, ImportMapping[]> = new Map();
+  private knownFiles: Set<string> | null = null;
   private cachesWarmed = false;
 
   constructor(projectRoot: string, queries: QueryBuilder) {
@@ -82,7 +87,27 @@ export class ReferenceResolver {
 
       // Index by ID
       this.nodeByIdCache.set(node.id, node);
+
+      // Index by kind
+      const byKind = this.kindCache.get(node.kind);
+      if (byKind) {
+        byKind.push(node);
+      } else {
+        this.kindCache.set(node.kind, [node]);
+      }
+
+      // Index by lowercase name (for fuzzy matching)
+      const lowerName = node.name.toLowerCase();
+      const byLower = this.lowerNameCache.get(lowerName);
+      if (byLower) {
+        byLower.push(node);
+      } else {
+        this.lowerNameCache.set(lowerName, [node]);
+      }
     }
+
+    // Pre-build known files set from index
+    this.knownFiles = new Set(this.queries.getAllFiles().map((f) => f.path));
 
     this.cachesWarmed = true;
   }
@@ -96,6 +121,10 @@ export class ReferenceResolver {
     this.nameCache.clear();
     this.qualifiedNameCache.clear();
     this.nodeByIdCache.clear();
+    this.kindCache.clear();
+    this.lowerNameCache.clear();
+    this.importMappingCache.clear();
+    this.knownFiles = null;
     this.cachesWarmed = false;
   }
 
@@ -131,10 +160,21 @@ export class ReferenceResolver {
       },
 
       getNodesByKind: (kind: Node['kind']) => {
+        if (this.cachesWarmed) {
+          return this.kindCache.get(kind) ?? [];
+        }
         return this.queries.getNodesByKind(kind);
       },
 
       fileExists: (filePath: string) => {
+        // Check pre-built known files set first (O(1))
+        if (this.knownFiles) {
+          const normalized = filePath.replace(/\\/g, '/');
+          if (this.knownFiles.has(filePath) || this.knownFiles.has(normalized)) {
+            return true;
+          }
+        }
+        // Fall back to filesystem for files not yet indexed
         const fullPath = path.join(this.projectRoot, filePath);
         try {
           return fs.existsSync(fullPath);
@@ -167,6 +207,32 @@ export class ReferenceResolver {
 
       getAllFiles: () => {
         return this.queries.getAllFiles().map((f) => f.path);
+      },
+
+      getNodesByLowerName: (lowerName: string) => {
+        if (this.cachesWarmed) {
+          return this.lowerNameCache.get(lowerName) ?? [];
+        }
+        // Fallback: scan all nodes (expensive, but only used if cache not warm)
+        return this.queries.getAllNodes().filter(
+          (n) => n.name.toLowerCase() === lowerName
+        );
+      },
+
+      getImportMappings: (filePath: string, language) => {
+        const cacheKey = filePath;
+        const cached = this.importMappingCache.get(cacheKey);
+        if (cached) return cached;
+
+        const content = this.context.readFile(filePath);
+        if (!content) {
+          this.importMappingCache.set(cacheKey, []);
+          return [];
+        }
+
+        const mappings = extractImportMappings(filePath, content, language);
+        this.importMappingCache.set(cacheKey, mappings);
+        return mappings;
       },
     };
   }
