@@ -38,6 +38,7 @@ export class ReferenceResolver {
   private fileCache: Map<string, string | null> = new Map();
   private nameCache: Map<string, Node[]> = new Map();
   private qualifiedNameCache: Map<string, Node[]> = new Map();
+  private kindCache: Map<string, Node[]> = new Map();
   private nodeByIdCache: Map<string, Node> = new Map();
   private cachesWarmed = false;
 
@@ -80,6 +81,14 @@ export class ReferenceResolver {
         this.qualifiedNameCache.set(node.qualifiedName, [node]);
       }
 
+      // Index by kind
+      const byKind = this.kindCache.get(node.kind);
+      if (byKind) {
+        byKind.push(node);
+      } else {
+        this.kindCache.set(node.kind, [node]);
+      }
+
       // Index by ID
       this.nodeByIdCache.set(node.id, node);
     }
@@ -95,6 +104,7 @@ export class ReferenceResolver {
     this.fileCache.clear();
     this.nameCache.clear();
     this.qualifiedNameCache.clear();
+    this.kindCache.clear();
     this.nodeByIdCache.clear();
     this.cachesWarmed = false;
   }
@@ -131,6 +141,9 @@ export class ReferenceResolver {
       },
 
       getNodesByKind: (kind: Node['kind']) => {
+        if (this.cachesWarmed) {
+          return this.kindCache.get(kind) ?? [];
+        }
         return this.queries.getNodesByKind(kind);
       },
 
@@ -361,6 +374,44 @@ export class ReferenceResolver {
 
     if (ref.language === 'python' && pythonBuiltIns.includes(name)) {
       return true;
+    }
+
+    // Pascal/Delphi built-ins and standard library units
+    if (ref.language === 'pascal') {
+      // Standard RTL/VCL/FMX unit prefixes — these are external dependencies
+      const pascalUnitPrefixes = [
+        'System.', 'Winapi.', 'Vcl.', 'Fmx.', 'Data.', 'Datasnap.',
+        'Soap.', 'Xml.', 'Web.', 'REST.', 'FireDAC.', 'IBX.',
+        'IdHTTP', 'IdTCP', 'IdSSL', 'Id',
+      ];
+      if (pascalUnitPrefixes.some((p) => name.startsWith(p))) {
+        return true;
+      }
+
+      // Common standalone RTL units and built-in identifiers
+      const pascalBuiltIns = [
+        'System', 'SysUtils', 'Classes', 'Types', 'Variants', 'StrUtils',
+        'Math', 'DateUtils', 'IOUtils', 'Generics.Collections', 'Generics.Defaults',
+        'Rtti', 'TypInfo', 'SyncObjs', 'RegularExpressions',
+        'SysInit', 'Windows', 'Messages', 'Graphics', 'Controls', 'Forms',
+        'Dialogs', 'StdCtrls', 'ExtCtrls', 'ComCtrls', 'Menus', 'ActnList',
+        'WriteLn', 'Write', 'ReadLn', 'Read', 'Inc', 'Dec', 'Ord', 'Chr',
+        'Length', 'SetLength', 'High', 'Low', 'Assigned', 'FreeAndNil',
+        'Format', 'IntToStr', 'StrToInt', 'FloatToStr', 'StrToFloat',
+        'Trim', 'UpperCase', 'LowerCase', 'Pos', 'Copy', 'Delete', 'Insert',
+        'Now', 'Date', 'Time', 'DateToStr', 'StrToDate',
+        'Raise', 'Exit', 'Break', 'Continue', 'Abort',
+        'True', 'False', 'nil', 'Self', 'Result',
+        'Create', 'Destroy', 'Free',
+        'TObject', 'TComponent', 'TPersistent', 'TInterfacedObject',
+        'TList', 'TStringList', 'TStrings', 'TStream', 'TMemoryStream', 'TFileStream',
+        'Exception', 'EAbort', 'EConvertError', 'EAccessViolation',
+        'IInterface', 'IUnknown',
+      ];
+
+      if (pascalBuiltIns.includes(name)) {
+        return true;
+      }
     }
 
     return false;
