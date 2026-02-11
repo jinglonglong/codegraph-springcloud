@@ -449,15 +449,18 @@ export class CodeGraph {
 
         // Resolve references if files were updated
         if (result.filesAdded > 0 || result.filesModified > 0) {
-          const unresolvedCount = this.queries.getUnresolvedReferences().length;
+          // Scope resolution to changed files when available (git fast path)
+          const unresolvedRefs = result.changedFilePaths
+            ? this.queries.getUnresolvedReferencesByFiles(result.changedFilePaths)
+            : this.queries.getUnresolvedReferences();
 
           options.onProgress?.({
             phase: 'resolving',
             current: 0,
-            total: unresolvedCount,
+            total: unresolvedRefs.length,
           });
 
-          this.resolveReferences((current, total) => {
+          this.resolver.resolveAndPersist(unresolvedRefs, (current, total) => {
             options.onProgress?.({
               phase: 'resolving',
               current,

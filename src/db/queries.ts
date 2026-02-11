@@ -897,6 +897,30 @@ export class QueryBuilder {
   }
 
   /**
+   * Get unresolved references scoped to specific file paths.
+   * Uses the idx_unresolved_file_path index for efficient lookup.
+   */
+  getUnresolvedReferencesByFiles(filePaths: string[]): UnresolvedReference[] {
+    if (filePaths.length === 0) return [];
+
+    const placeholders = filePaths.map(() => '?').join(',');
+    const rows = this.db
+      .prepare(`SELECT * FROM unresolved_refs WHERE file_path IN (${placeholders})`)
+      .all(...filePaths) as UnresolvedRefRow[];
+
+    return rows.map((row) => ({
+      fromNodeId: row.from_node_id,
+      referenceName: row.reference_name,
+      referenceKind: row.reference_kind as EdgeKind,
+      line: row.line,
+      column: row.col,
+      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
+      filePath: row.file_path,
+      language: row.language as Language,
+    }));
+  }
+
+  /**
    * Delete all unresolved references (after resolution)
    */
   clearUnresolvedReferences(): void {
