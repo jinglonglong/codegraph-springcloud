@@ -887,6 +887,7 @@ export class TreeSitterExtractor {
   private errors: ExtractionError[] = [];
   private extractor: LanguageExtractor | null = null;
   private nodeStack: string[] = []; // Stack of parent node IDs
+  private methodIndex: Map<string, string> | null = null; // name → node ID for defProc lookup
 
   constructor(filePath: string, source: string, language?: Language) {
     this.filePath = filePath;
@@ -2331,12 +2332,17 @@ export class TreeSitterExtractor {
     // fullName is like "TAuthService.Create" — we want just the method name part
     const shortName = fullName.includes('.') ? fullName.split('.').pop()! : fullName;
 
-    // Find matching node from earlier extraction
-    const existingNode = this.nodes.find(
-      (n) => n.name === shortName && (n.kind === 'method' || n.kind === 'function')
-    );
+    // Build method index on first use (O(n) once, then O(1) per lookup)
+    if (!this.methodIndex) {
+      this.methodIndex = new Map();
+      for (const n of this.nodes) {
+        if (n.kind === 'method' || n.kind === 'function') {
+          this.methodIndex.set(n.name, n.id);
+        }
+      }
+    }
 
-    const parentId = existingNode?.id || this.nodeStack[this.nodeStack.length - 1];
+    const parentId = this.methodIndex.get(shortName) || this.nodeStack[this.nodeStack.length - 1];
     if (!parentId) return;
 
     // Visit the block for calls
