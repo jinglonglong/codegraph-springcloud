@@ -5,6 +5,7 @@
  * with Claude Code.
  */
 
+import { execSync } from 'child_process';
 import { showBanner, showNextSteps, success, error, info, chalk } from './banner';
 import { promptInstallLocation, promptAutoAllow, InstallLocation } from './prompts';
 import { writeMcpConfig, writePermissions, writeClaudeMd, writeHooks, hasMcpConfig, hasPermissions, hasHooks } from './config-writer';
@@ -24,11 +25,42 @@ export async function runInstaller(): Promise<void> {
   showBanner();
 
   try {
-    // Step 1: Ask for installation location
+    // Step 1: Try global install for bare `codegraph` command convenience.
+    // This is best-effort — configs always use npx regardless.
+    let codegraphAvailable = false;
+    try {
+      const checkCmd = process.platform === 'win32' ? 'where codegraph' : 'command -v codegraph';
+      execSync(checkCmd, { stdio: 'pipe' });
+      codegraphAvailable = true;
+    } catch {
+      // Not installed globally yet — try to install
+      console.log(chalk.dim('  Installing codegraph globally...'));
+      try {
+        execSync('npm install -g @colbymchenry/codegraph', { stdio: 'pipe' });
+        // Verify it actually worked (PATH may not include npm global bin)
+        try {
+          execSync(process.platform === 'win32' ? 'where codegraph' : 'command -v codegraph', { stdio: 'pipe' });
+          codegraphAvailable = true;
+          success('Installed codegraph command globally');
+        } catch {
+          // Install "succeeded" but command not in PATH — common with nvm/fnm
+          info('Global install succeeded but codegraph is not in your PATH');
+          info('You may need to add npm\'s global bin to your PATH, or use:');
+          info('  npx @colbymchenry/codegraph <command>');
+        }
+      } catch {
+        info('Could not install globally (permission denied)');
+        info('You can install manually with: sudo npm install -g @colbymchenry/codegraph');
+        info('Or use: npx @colbymchenry/codegraph <command>');
+      }
+      console.log();
+    }
+
+    // Step 2: Ask for installation location
     const location = await promptInstallLocation();
     console.log();
 
-    // Step 2: Write MCP configuration
+    // Step 3: Write MCP configuration (always uses npx for reliability)
     const alreadyHasMcp = hasMcpConfig(location);
     writeMcpConfig(location);
 
@@ -38,7 +70,7 @@ export async function runInstaller(): Promise<void> {
       success(`Added MCP server to ${location === 'global' ? '~/.claude.json' : './.claude.json'}`);
     }
 
-    // Step 3: Ask about auto-allow permissions
+    // Step 4: Ask about auto-allow permissions
     const autoAllow = await promptAutoAllow();
     console.log();
 
@@ -53,7 +85,7 @@ export async function runInstaller(): Promise<void> {
       }
     }
 
-    // Step 4: Write auto-sync hooks
+    // Step 5: Write auto-sync hooks
     const alreadyHasHooks = hasHooks(location);
     writeHooks(location);
 
@@ -63,7 +95,7 @@ export async function runInstaller(): Promise<void> {
       success(`Added auto-sync hooks to ${location === 'global' ? '~/.claude/settings.json' : './.claude/settings.json'}`);
     }
 
-    // Step 5: Write CLAUDE.md instructions
+    // Step 6: Write CLAUDE.md instructions
     const claudeMdResult = writeClaudeMd(location);
     const claudeMdPath = location === 'global' ? '~/.claude/CLAUDE.md' : './.claude/CLAUDE.md';
 
@@ -75,13 +107,13 @@ export async function runInstaller(): Promise<void> {
       success(`Added CodeGraph instructions to ${claudeMdPath}`);
     }
 
-    // Step 6: For local install, initialize the project
+    // Step 7: For local install, initialize the project
     if (location === 'local') {
       await initializeLocalProject();
     }
 
     // Show next steps
-    showNextSteps(location);
+    showNextSteps(location, codegraphAvailable);
   } catch (err) {
     console.log();
     if (err instanceof Error && err.message.includes('readline was closed')) {
