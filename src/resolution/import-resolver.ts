@@ -425,6 +425,16 @@ function extractPHPImports(content: string): ImportMapping[] {
   return mappings;
 }
 
+// Cache import mappings per file to avoid re-reading and re-parsing
+const importMappingCache = new Map<string, ImportMapping[]>();
+
+/**
+ * Clear the import mapping cache (call between indexing runs)
+ */
+export function clearImportMappingCache(): void {
+  importMappingCache.clear();
+}
+
 /**
  * Resolve a reference using import mappings
  */

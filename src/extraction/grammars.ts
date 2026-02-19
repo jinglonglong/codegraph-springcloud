@@ -6,6 +6,7 @@
  * getParser() returns synchronously from cache.
  */
 
+import * as path from 'path';
 import { Parser, Language as WasmLanguage } from 'web-tree-sitter';
 import { Language } from '../types';
 
@@ -32,6 +33,7 @@ const WASM_GRAMMAR_FILES: Record<GrammarLanguage, string> = {
   swift: 'tree-sitter-swift.wasm',
   kotlin: 'tree-sitter-kotlin.wasm',
   dart: 'tree-sitter-dart.wasm',
+  pascal: 'tree-sitter-pascal.wasm',
 };
 
 /**
@@ -66,6 +68,12 @@ export const EXTENSION_MAP: Record<string, Language> = {
   '.dart': 'dart',
   '.liquid': 'liquid',
   '.svelte': 'svelte',
+  '.pas': 'pascal',
+  '.dpr': 'pascal',
+  '.dpk': 'pascal',
+  '.lpr': 'pascal',
+  '.dfm': 'pascal',
+  '.fmx': 'pascal',
 };
 
 /**
@@ -91,9 +99,12 @@ export async function initGrammars(): Promise<void> {
   const entries = Object.entries(WASM_GRAMMAR_FILES) as [GrammarLanguage, string][];
   for (const [lang, wasmFile] of entries) {
     try {
-      const wasmPath = require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
-      const language = await WasmLanguage.load(wasmPath);
-      languageCache.set(lang, language);
+        // Pascal ships its own WASM (not in tree-sitter-wasms)
+        const wasmPath = lang === 'pascal'
+          ? path.join(__dirname, 'wasm', wasmFile)
+          : require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
+        const language = await WasmLanguage.load(wasmPath);
+        languageCache.set(lang, language);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[CodeGraph] Failed to load ${lang} grammar — parsing will be unavailable: ${message}`);
@@ -202,6 +213,7 @@ export function getLanguageDisplayName(language: Language): string {
     dart: 'Dart',
     svelte: 'Svelte',
     liquid: 'Liquid',
+    pascal: 'Pascal / Delphi',
     unknown: 'Unknown',
   };
   return names[language] || language;
