@@ -113,21 +113,18 @@ export function warn(message: string): void {
 /**
  * Show the "next steps" section after installation
  */
-export function showNextSteps(location: 'global' | 'local', codegraphAvailable?: boolean): void {
+export function showNextSteps(location: 'global' | 'local'): void {
   console.log();
   console.log(chalk.bold('  Done!') + ' Restart Claude Code to use CodeGraph.');
   console.log();
 
   if (location === 'global') {
-    const cmd = codegraphAvailable ? 'codegraph' : 'npx @colbymchenry/codegraph';
     console.log(chalk.dim('  Quick start:'));
     console.log(chalk.dim('    cd your-project'));
-    console.log(chalk.cyan(`    ${cmd} init -i`));
-    if (!codegraphAvailable) {
-      console.log();
-      console.log(chalk.dim('  Tip: For a shorter command, install globally:'));
-      console.log(chalk.dim('    npm install -g @colbymchenry/codegraph'));
-    }
+    console.log(chalk.cyan('    codegraph init -i'));
+    console.log();
+    console.log(chalk.dim('  To uninstall:'));
+    console.log(chalk.dim('    npm uninstall -g @colbymchenry/codegraph'));
   } else {
     console.log(chalk.dim('  CodeGraph is ready to use in this project!'));
   }

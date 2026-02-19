@@ -25,13 +25,10 @@ export async function runInstaller(): Promise<void> {
   showBanner();
 
   try {
-    // Step 1: Try global install for bare `codegraph` command convenience.
-    // This is best-effort — configs always use npx regardless.
-    let codegraphAvailable = false;
+    // Step 1: Ensure codegraph is installed globally
     try {
       const checkCmd = process.platform === 'win32' ? 'where codegraph' : 'command -v codegraph';
       execSync(checkCmd, { stdio: 'pipe' });
-      codegraphAvailable = true;
     } catch {
       // Not installed globally yet — try to install
       console.log(chalk.dim('  Installing codegraph globally...'));
@@ -40,18 +37,16 @@ export async function runInstaller(): Promise<void> {
         // Verify it actually worked (PATH may not include npm global bin)
         try {
           execSync(process.platform === 'win32' ? 'where codegraph' : 'command -v codegraph', { stdio: 'pipe' });
-          codegraphAvailable = true;
           success('Installed codegraph command globally');
         } catch {
           // Install "succeeded" but command not in PATH — common with nvm/fnm
           info('Global install succeeded but codegraph is not in your PATH');
-          info('You may need to add npm\'s global bin to your PATH, or use:');
-          info('  npx @colbymchenry/codegraph <command>');
+          info('You may need to add npm\'s global bin directory to your PATH');
+          info('Then restart your terminal and run: codegraph init -i');
         }
       } catch {
         info('Could not install globally (permission denied)');
-        info('You can install manually with: sudo npm install -g @colbymchenry/codegraph');
-        info('Or use: npx @colbymchenry/codegraph <command>');
+        info('Try: sudo npm install -g @colbymchenry/codegraph');
       }
       console.log();
     }
@@ -113,7 +108,7 @@ export async function runInstaller(): Promise<void> {
     }
 
     // Show next steps
-    showNextSteps(location, codegraphAvailable);
+    showNextSteps(location);
   } catch (err) {
     console.log();
     if (err instanceof Error && err.message.includes('readline was closed')) {
@@ -139,7 +134,7 @@ async function initializeLocalProject(): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     error(`Could not load native modules: ${msg}`);
-    info('Skipping project initialization. You can run "npx @colbymchenry/codegraph init -i" later.');
+    info('Skipping project initialization. You can run "codegraph init -i" later.');
     info('If this persists, try a Node.js LTS version (20 or 22).');
     return;
   }

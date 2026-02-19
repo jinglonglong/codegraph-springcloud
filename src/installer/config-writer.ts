@@ -98,13 +98,13 @@ function writeJsonFile(filePath: string, data: Record<string, any>): void {
 }
 
 /**
- * Get the MCP server configuration — always uses npx for reliability
+ * Get the MCP server configuration
  */
 function getMcpServerConfig(): Record<string, any> {
   return {
     type: 'stdio',
-    command: 'npx',
-    args: ['@colbymchenry/codegraph', 'serve', '--mcp'],
+    command: 'codegraph',
+    args: ['serve', '--mcp'],
   };
 }
 
@@ -203,7 +203,7 @@ export function hasPermissions(location: InstallLocation): boolean {
  * Stop → sync-if-dirty (sync, ensures fresh index before next user turn)
  */
 function getHooksConfig(): Record<string, any> {
-  const command = 'npx @colbymchenry/codegraph';
+  const command = 'codegraph';
 
   return {
     PostToolUse: [
