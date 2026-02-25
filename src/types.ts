@@ -618,6 +618,7 @@ export const DEFAULT_CONFIG: CodeGraphConfig = {
     '**/Debug/**',
     '**/Release/**',
     '**/x64/**',
+    '**/.pio/**',  // Platform.io (IoT/embedded build artifacts and library deps)
 
     // Electron
     '**/release/**',
