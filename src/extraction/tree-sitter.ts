@@ -1086,7 +1086,13 @@ export class TreeSitterExtractor {
     name: string,
     node: SyntaxNode,
     extra?: Partial<Node>
-  ): Node {
+  ): Node | null {
+    // Skip nodes with empty/missing names — they are not meaningful symbols
+    // and would cause FK violations when edges reference them (see issue #42)
+    if (!name) {
+      return null;
+    }
+
     const id = generateNodeId(this.filePath, kind, name, node.startPosition.row + 1);
 
     const newNode: Node = {
@@ -1209,6 +1215,7 @@ export class TreeSitterExtractor {
       isAsync,
       isStatic,
     });
+    if (!funcNode) return;
 
     // Push to stack and visit body
     this.nodeStack.push(funcNode.id);
@@ -1238,6 +1245,7 @@ export class TreeSitterExtractor {
       visibility,
       isExported,
     });
+    if (!classNode) return;
 
     // Extract extends/implements
     this.extractInheritance(node, classNode.id);
@@ -1291,6 +1299,7 @@ export class TreeSitterExtractor {
       isAsync,
       isStatic,
     });
+    if (!methodNode) return;
 
     // Push to stack and visit body
     this.nodeStack.push(methodNode.id);
@@ -1340,6 +1349,7 @@ export class TreeSitterExtractor {
       visibility,
       isExported,
     });
+    if (!structNode) return;
 
     // Push to stack for field extraction
     this.nodeStack.push(structNode.id);
@@ -2214,24 +2224,28 @@ export class TreeSitterExtractor {
 
     if (declClass) {
       const classNode = this.createNode('class', name, node);
-      // Extract inheritance from typeref children of declClass
-      this.extractPascalInheritance(declClass, classNode.id);
-      // Visit class body
-      this.nodeStack.push(classNode.id);
-      for (let i = 0; i < declClass.namedChildCount; i++) {
-        const child = declClass.namedChild(i);
-        if (child) this.visitNode(child);
+      if (classNode) {
+        // Extract inheritance from typeref children of declClass
+        this.extractPascalInheritance(declClass, classNode.id);
+        // Visit class body
+        this.nodeStack.push(classNode.id);
+        for (let i = 0; i < declClass.namedChildCount; i++) {
+          const child = declClass.namedChild(i);
+          if (child) this.visitNode(child);
+        }
+        this.nodeStack.pop();
       }
-      this.nodeStack.pop();
     } else if (declIntf) {
       const ifaceNode = this.createNode('interface', name, node);
-      // Visit interface members
-      this.nodeStack.push(ifaceNode.id);
-      for (let i = 0; i < declIntf.namedChildCount; i++) {
-        const child = declIntf.namedChild(i);
-        if (child) this.visitNode(child);
+      if (ifaceNode) {
+        // Visit interface members
+        this.nodeStack.push(ifaceNode.id);
+        for (let i = 0; i < declIntf.namedChildCount; i++) {
+          const child = declIntf.namedChild(i);
+          if (child) this.visitNode(child);
+        }
+        this.nodeStack.pop();
       }
-      this.nodeStack.pop();
     } else if (typeChild) {
       // Check if it contains a declEnum
       const declEnum = typeChild.namedChildren.find(
@@ -2239,18 +2253,20 @@ export class TreeSitterExtractor {
       );
       if (declEnum) {
         const enumNode = this.createNode('enum', name, node);
-        // Extract enum members
-        this.nodeStack.push(enumNode.id);
-        for (let i = 0; i < declEnum.namedChildCount; i++) {
-          const child = declEnum.namedChild(i);
-          if (child?.type === 'declEnumValue') {
-            const memberName = getChildByField(child, 'name');
-            if (memberName) {
-              this.createNode('enum_member', getNodeText(memberName, this.source), child);
+        if (enumNode) {
+          // Extract enum members
+          this.nodeStack.push(enumNode.id);
+          for (let i = 0; i < declEnum.namedChildCount; i++) {
+            const child = declEnum.namedChild(i);
+            if (child?.type === 'declEnumValue') {
+              const memberName = getChildByField(child, 'name');
+              if (memberName) {
+                this.createNode('enum_member', getNodeText(memberName, this.source), child);
+              }
             }
           }
+          this.nodeStack.pop();
         }
-        this.nodeStack.pop();
       } else {
         // Simple type alias: type TFoo = string / type TFoo = Integer
         this.createNode('type_alias', name, node);
