@@ -650,24 +650,40 @@ export class ExtractionOrchestrator {
       this.queries.deleteFile(filePath);
     }
 
+    // Filter out nodes with missing required fields before insertion.
+    // This prevents FK violations when edges reference nodes that would
+    // be silently skipped by insertNode() (see issue #42).
+    const validNodes = result.nodes.filter((n) => n.id && n.kind && n.name && n.filePath && n.language);
+
     // Insert nodes
-    if (result.nodes.length > 0) {
-      this.queries.insertNodes(result.nodes);
+    if (validNodes.length > 0) {
+      this.queries.insertNodes(validNodes);
     }
 
-    // Insert edges
+    // Filter edges to only reference nodes that were actually inserted
     if (result.edges.length > 0) {
-      this.queries.insertEdges(result.edges);
+      const insertedIds = new Set(validNodes.map((n) => n.id));
+      const validEdges = result.edges.filter(
+        (e) => insertedIds.has(e.source) && insertedIds.has(e.target)
+      );
+      if (validEdges.length > 0) {
+        this.queries.insertEdges(validEdges);
+      }
     }
 
     // Insert unresolved references in batch with denormalized filePath/language
     if (result.unresolvedReferences.length > 0) {
-      const refsWithContext = result.unresolvedReferences.map((ref) => ({
-        ...ref,
-        filePath: ref.filePath ?? filePath,
-        language: ref.language ?? language,
-      }));
-      this.queries.insertUnresolvedRefsBatch(refsWithContext);
+      const insertedIds = new Set(validNodes.map((n) => n.id));
+      const refsWithContext = result.unresolvedReferences
+        .filter((ref) => insertedIds.has(ref.fromNodeId))
+        .map((ref) => ({
+          ...ref,
+          filePath: ref.filePath ?? filePath,
+          language: ref.language ?? language,
+        }));
+      if (refsWithContext.length > 0) {
+        this.queries.insertUnresolvedRefsBatch(refsWithContext);
+      }
     }
 
     // Insert file record
