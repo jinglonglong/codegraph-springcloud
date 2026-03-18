@@ -2,15 +2,15 @@
  * Grammar Loading and Caching
  *
  * Uses web-tree-sitter (WASM) for universal cross-platform support.
- * All grammars are pre-loaded asynchronously via initGrammars(), then
- * getParser() returns synchronously from cache.
+ * Grammars are loaded lazily — only languages actually present in the project
+ * are compiled, keeping V8 WASM memory pressure low on large codebases.
  */
 
 import * as path from 'path';
 import { Parser, Language as WasmLanguage } from 'web-tree-sitter';
 import { Language } from '../types';
 
-type GrammarLanguage = Exclude<Language, 'svelte' | 'liquid' | 'unknown'>;
+export type GrammarLanguage = Exclude<Language, 'svelte' | 'liquid' | 'unknown'>;
 
 /**
  * WASM filename map — maps each language to its .wasm grammar file
@@ -83,43 +83,72 @@ const parserCache = new Map<Language, Parser>();
 const languageCache = new Map<Language, WasmLanguage>();
 const unavailableGrammarErrors = new Map<Language, string>();
 
-let grammarsInitialized = false;
+let parserInitialized = false;
 
 /**
- * Initialize all WASM grammars. Must be called before any parsing.
+ * Initialize the tree-sitter WASM runtime. Must be called before loading grammars.
+ * Does NOT load any grammar WASM files — use loadGrammarsForLanguages() for that.
  * Idempotent — safe to call multiple times.
  */
 export async function initGrammars(): Promise<void> {
-  if (grammarsInitialized) return;
+  if (parserInitialized) return;
 
   await Parser.init();
 
+  parserInitialized = true;
+}
+
+/**
+ * Load grammar WASM files for specific languages only.
+ * Skips languages that are already loaded or have no WASM grammar.
+ * Must be called after initGrammars().
+ */
+export async function loadGrammarsForLanguages(languages: Language[]): Promise<void> {
+  if (!parserInitialized) {
+    await initGrammars();
+  }
+
+  // Deduplicate and filter to languages that have WASM grammars and aren't already loaded
+  const toLoad = [...new Set(languages)].filter(
+    (lang): lang is GrammarLanguage =>
+      lang in WASM_GRAMMAR_FILES &&
+      !languageCache.has(lang) &&
+      !unavailableGrammarErrors.has(lang)
+  );
+
   // Load grammars sequentially to avoid web-tree-sitter WASM race condition on Node 20+
   // See: https://github.com/tree-sitter/tree-sitter/issues/2338
-  const entries = Object.entries(WASM_GRAMMAR_FILES) as [GrammarLanguage, string][];
-  for (const [lang, wasmFile] of entries) {
+  for (const lang of toLoad) {
+    const wasmFile = WASM_GRAMMAR_FILES[lang];
     try {
-        // Pascal ships its own WASM (not in tree-sitter-wasms)
-        const wasmPath = lang === 'pascal'
-          ? path.join(__dirname, 'wasm', wasmFile)
-          : require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
-        const language = await WasmLanguage.load(wasmPath);
-        languageCache.set(lang, language);
+      // Pascal ships its own WASM (not in tree-sitter-wasms)
+      const wasmPath = lang === 'pascal'
+        ? path.join(__dirname, 'wasm', wasmFile)
+        : require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
+      const language = await WasmLanguage.load(wasmPath);
+      languageCache.set(lang, language);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`[CodeGraph] Failed to load ${lang} grammar — parsing will be unavailable: ${message}`);
       unavailableGrammarErrors.set(lang, message);
     }
   }
+}
 
-  grammarsInitialized = true;
+/**
+ * Load ALL grammar WASM files. Convenience function for tests and
+ * backward compatibility. Prefer loadGrammarsForLanguages() in production.
+ */
+export async function loadAllGrammars(): Promise<void> {
+  const allLanguages = Object.keys(WASM_GRAMMAR_FILES) as GrammarLanguage[];
+  await loadGrammarsForLanguages(allLanguages);
 }
 
 /**
  * Check if grammars have been initialized
  */
 export function isGrammarsInitialized(): boolean {
-  return grammarsInitialized;
+  return parserInitialized;
 }
 
 /**
@@ -151,22 +180,29 @@ export function detectLanguage(filePath: string): Language {
 }
 
 /**
- * Check if a language is supported by currently available parsers.
+ * Check if a language is supported (has a grammar defined).
+ * Returns true if the grammar exists, even if not yet loaded.
  */
 export function isLanguageSupported(language: Language): boolean {
   if (language === 'svelte') return true; // custom extractor (script block delegation)
   if (language === 'liquid') return true; // custom regex extractor
   if (language === 'unknown') return false;
+  return language in WASM_GRAMMAR_FILES;
+}
+
+/**
+ * Check if a grammar has been loaded and is ready for parsing.
+ */
+export function isGrammarLoaded(language: Language): boolean {
+  if (language === 'svelte' || language === 'liquid') return true;
   return languageCache.has(language);
 }
 
 /**
- * Get all currently supported languages.
+ * Get all supported languages (those with grammar definitions).
  */
 export function getSupportedLanguages(): Language[] {
-  const available = (Object.keys(WASM_GRAMMAR_FILES) as GrammarLanguage[])
-    .filter((language) => languageCache.has(language));
-  return [...available, 'svelte', 'liquid'];
+  return [...(Object.keys(WASM_GRAMMAR_FILES) as GrammarLanguage[]), 'svelte', 'liquid'];
 }
 
 /**
@@ -175,7 +211,7 @@ export function getSupportedLanguages(): Language[] {
 export function clearParserCache(): void {
   parserCache.clear();
   // Note: languageCache is NOT cleared — WASM languages persist.
-  // To fully re-init, set grammarsInitialized = false and call initGrammars() again.
+  // To fully re-init, set parserInitialized = false and call initGrammars() again.
   unavailableGrammarErrors.clear();
 }
 

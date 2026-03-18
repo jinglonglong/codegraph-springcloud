@@ -25,10 +25,12 @@ import {
   clearParserCache,
   getUnavailableGrammarErrors,
   initGrammars,
+  loadAllGrammars,
 } from '../src/extraction/grammars';
 
 beforeAll(async () => {
   await initGrammars();
+  await loadAllGrammars();
 });
 
 // Create a temporary directory for each test
