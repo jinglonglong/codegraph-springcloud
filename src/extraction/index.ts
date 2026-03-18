@@ -18,7 +18,7 @@ import {
 } from '../types';
 import { QueryBuilder } from '../db/queries';
 import { extractFromSource } from './tree-sitter';
-import { detectLanguage, isLanguageSupported, initGrammars } from './grammars';
+import { detectLanguage, isLanguageSupported, initGrammars, loadGrammarsForLanguages } from './grammars';
 import { logDebug, logWarn } from '../errors';
 import { captureException } from '../sentry';
 import { validatePathWithinRoot, normalizePath } from '../utils';
@@ -378,6 +378,12 @@ export class ExtractionOrchestrator {
       };
     }
 
+    // Load only the grammars needed for languages actually present in the project.
+    // This avoids compiling all 16+ WASM grammar modules upfront, which can cause
+    // V8 WASM Zone OOM on large codebases (see issue #54).
+    const neededLanguages = [...new Set(files.map((f) => detectLanguage(f)))];
+    await loadGrammarsForLanguages(neededLanguages);
+
     // Phase 2: Parse files (read in parallel batches, parse/store sequentially)
     const total = files.length;
     let processed = 0;
@@ -683,7 +689,7 @@ export class ExtractionOrchestrator {
    * Uses git status as a fast path when available, falling back to full scan.
    */
   async sync(onProgress?: (progress: IndexProgress) => void): Promise<SyncResult> {
-    await initGrammars();
+    await initGrammars(); // Initialize WASM runtime (grammars loaded lazily below)
     const startTime = Date.now();
     let filesChecked = 0;
     let filesAdded = 0;
@@ -792,6 +798,12 @@ export class ExtractionOrchestrator {
           filesModified++;
         }
       }
+    }
+
+    // Load only grammars needed for changed files
+    if (filesToIndex.length > 0) {
+      const neededLanguages = [...new Set(filesToIndex.map((f) => detectLanguage(f)))];
+      await loadGrammarsForLanguages(neededLanguages);
     }
 
     // Index changed files
@@ -920,4 +932,4 @@ export class ExtractionOrchestrator {
 
 // Re-export useful types and functions
 export { extractFromSource } from './tree-sitter';
-export { detectLanguage, isLanguageSupported, getSupportedLanguages, initGrammars } from './grammars';
+export { detectLanguage, isLanguageSupported, isGrammarLoaded, getSupportedLanguages, initGrammars, loadGrammarsForLanguages, loadAllGrammars } from './grammars';

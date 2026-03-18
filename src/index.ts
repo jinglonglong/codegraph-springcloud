@@ -61,7 +61,7 @@ export {
   CODEGRAPH_DIR,
 } from './directory';
 export { IndexProgress, IndexResult, SyncResult } from './extraction';
-export { detectLanguage, isLanguageSupported, getSupportedLanguages, initGrammars } from './extraction';
+export { detectLanguage, isLanguageSupported, isGrammarLoaded, getSupportedLanguages, initGrammars, loadGrammarsForLanguages, loadAllGrammars } from './extraction';
 export { ResolutionResult } from './resolution';
 export { EmbeddingProgress } from './vectors';
 export {

@@ -10,12 +10,13 @@ import * as path from 'path';
 import * as os from 'os';
 import { CodeGraph } from '../src';
 import { extractFromSource, scanDirectory, shouldIncludeFile } from '../src/extraction';
-import { detectLanguage, isLanguageSupported, getSupportedLanguages, initGrammars } from '../src/extraction/grammars';
+import { detectLanguage, isLanguageSupported, getSupportedLanguages, initGrammars, loadAllGrammars } from '../src/extraction/grammars';
 import { normalizePath } from '../src/utils';
 import { DEFAULT_CONFIG } from '../src/types';
 
 beforeAll(async () => {
   await initGrammars();
+  await loadAllGrammars();
 });
 
 // Create a temporary directory for each test

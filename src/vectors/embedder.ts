@@ -127,8 +127,10 @@ export class TextEmbedder {
       env.allowRemoteModels = false;
     }
 
-    // Load the pipeline
+    // Load the pipeline with quantized model to reduce WASM memory pressure.
+    // Quantized (int8/uint8) is ~4x smaller than FP32 with minimal quality loss.
     this.pipeline = await pipeline('feature-extraction', this.modelId, {
+      quantized: true,
       progress_callback: this.showProgress
         ? (progress: { status: string; file?: string; progress?: number }) => {
             if (progress.status === 'progress' && progress.file && progress.progress) {
