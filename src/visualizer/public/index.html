@@ -744,7 +744,7 @@
 
       <div id="search-container">
         <span class="search-icon">&#x1F50D;</span>
-        <input id="search-input" type="text" placeholder="Ask about your code... (Ctrl+K)" autocomplete="off" spellcheck="false" />
+        <input id="search-input" type="text" placeholder="Search symbols... (Ctrl+K)" autocomplete="off" spellcheck="false" />
         <div id="search-results-dropdown"></div>
       </div>
 
@@ -796,14 +796,8 @@
         <div id="cy"></div>
         <div id="graph-overlay">
           <div class="overlay-icon">&#x1F52E;</div>
-          <div class="overlay-title">Ask about your code</div>
-          <div class="overlay-subtitle">Try: "How does authentication work?" or "What happens when a user signs in?"</div>
-          <div class="overlay-examples" style="margin-top:16px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center;">
-            <button class="example-btn" onclick="exploreQuery('authentication and login')">Authentication flow</button>
-            <button class="example-btn" onclick="exploreQuery('API routes and endpoints')">API routes</button>
-            <button class="example-btn" onclick="exploreQuery('database and data storage')">Database layer</button>
-            <button class="example-btn" onclick="exploreQuery('error handling')">Error handling</button>
-          </div>
+          <div class="overlay-title">Search for a starting point</div>
+          <div class="overlay-subtitle">Type a symbol name, pick it, and trace its call chain</div>
         </div>
         <div id="breadcrumbs"></div>
         <div id="graph-controls">
@@ -1459,9 +1453,27 @@
       if (e.key === 'Enter') {
         e.preventDefault();
         const query = e.target.value.trim();
-        if (query) {
-          hideSearchDropdown();
-          exploreQuery(query);
+        if (!query) return;
+
+        // If dropdown is visible and has results, select the first one
+        const dropdown = document.getElementById('search-results-dropdown');
+        const firstItem = dropdown.querySelector('.search-result-item');
+        if (dropdown.classList.contains('visible') && firstItem) {
+          firstItem.click();
+        } else {
+          // Trigger a search and auto-select first result
+          (async () => {
+            try {
+              const data = await api.search(query, null, 10);
+              if (data.results.length > 0) {
+                selectSearchResult(data.results[0].node.id);
+              } else {
+                showToast('No symbols found. Try a different search.');
+              }
+            } catch (err) {
+              showToast('Search error: ' + err.message);
+            }
+          })();
         }
       }
     }
