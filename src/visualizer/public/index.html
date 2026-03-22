@@ -948,7 +948,7 @@
       embeddingsStatus: () => api.get('embeddings/status'),
       status: ()          => api.get('status'),
       search: (q, kind, limit) => api.get(`search?q=${encodeURIComponent(q)}${kind ? '&kind='+kind : ''}&limit=${limit||30}`),
-      explore: (q, maxNodes) => api.get(`explore?q=${encodeURIComponent(q)}&maxNodes=${maxNodes||30}`),
+      explore: (q) => api.get(`explore?q=${encodeURIComponent(q)}`),
       overview: (limit)   => api.get(`overview?limit=${limit||60}`),
       files: ()           => api.get('files'),
       fileNodes: (p)      => api.get(`file-nodes?path=${encodeURIComponent(p)}`),
@@ -1403,32 +1403,24 @@
       hideOverlay();
       document.getElementById('search-input').value = question;
 
-      showToast('Asking Claude...');
+      showToast('Finding entry point...');
 
       try {
-        const data = await api.explore(question, 30);
+        const data = await api.explore(question);
         if (data.nodes.length === 0) {
-          showToast('No relevant code found. Try different keywords.');
+          showToast('No relevant code found. Try searching for a specific symbol.');
           hideOverlay(false);
           return;
         }
         addSubgraph(data.nodes, data.edges);
-
-        // Highlight root nodes, with entry point getting special treatment
-        if (data.roots && data.roots.length > 0) {
-          for (const rootId of data.roots) {
-            const ele = cy.getElementById(rootId);
-            if (ele.length > 0) ele.addClass('highlighted');
-          }
-        }
-
         runLayout();
 
-        // Center on entry point if available
+        // Center on entry point
         if (data.entryPoint) {
           const entryEle = cy.getElementById(data.entryPoint);
           if (entryEle.length > 0) {
             entryEle.select();
+            entryEle.addClass('highlighted');
             setTimeout(() => {
               cy.animate({ center: { eles: entryEle } }, { duration: 400 });
               showNodeDetails(data.entryPoint);
@@ -1437,7 +1429,7 @@
         }
 
         const source = data.usedClaude ? ' (via Claude)' : '';
-        showToast(`Found ${data.nodes.length} related symbols${source}`);
+        showToast(`Traced ${data.nodes.length} symbols from entry point${source}`);
       } catch (err) {
         showToast('Error: ' + err.message);
       }
@@ -1499,37 +1491,36 @@
       hideSearchDropdown();
       document.getElementById('search-input').value = '';
       hideOverlay();
+      clearGraph();
+      hideOverlay();
 
-      // Add to graph if not present
+      showToast('Tracing call chain...');
+
       try {
-        const data = await api.node(nodeId);
-        if (data.node) {
-          addNodeToGraph(data.node);
-          // Also load its immediate relations
-          const [callersData, calleesData] = await Promise.all([
-            api.callers(nodeId, 1),
-            api.callees(nodeId, 1),
-          ]);
-          for (const item of callersData.items) {
-            addNodeToGraph(item.node);
-            addEdgeToGraph(item.edge);
-          }
-          for (const item of calleesData.items) {
-            addNodeToGraph(item.node);
-            addEdgeToGraph(item.edge);
-          }
-          expandedSets.callers.add(nodeId);
-          expandedSets.callees.add(nodeId);
-          runLayout();
-          // Select and focus
-          const ele = cy.getElementById(nodeId);
-          if (ele.length > 0) {
-            cy.nodes().unselect();
-            ele.select();
-            cy.animate({ center: { eles: ele }, zoom: 1.5 }, { duration: 300 });
-          }
-          showNodeDetails(nodeId);
+        // Load the call graph from this entry point (depth 3 forward)
+        const data = await api.callgraph(nodeId, 3);
+        if (data.nodes.length === 0) {
+          // Fallback: just show the node
+          const nodeData = await api.node(nodeId);
+          if (nodeData.node) addNodeToGraph(nodeData.node);
+        } else {
+          addSubgraph(data.nodes, data.edges);
         }
+
+        runLayout();
+
+        // Select and center on the entry point
+        const ele = cy.getElementById(nodeId);
+        if (ele.length > 0) {
+          ele.select();
+          ele.addClass('highlighted');
+          setTimeout(() => {
+            cy.animate({ center: { eles: ele } }, { duration: 300 });
+          }, 350);
+        }
+
+        showNodeDetails(nodeId);
+        showToast(`Traced ${data.nodes.length} symbols from entry point`);
       } catch (err) {
         showToast('Error: ' + err.message);
       }

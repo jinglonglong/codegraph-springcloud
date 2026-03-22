@@ -80,17 +80,15 @@ export class VisualizerServer {
 
     const symbolIndex = this.buildSymbolIndex();
 
-    const prompt = `You are tracing a code flow through a codebase. Given the question and symbol index below, identify the EXACT execution path.
+    const prompt = `Given the question and codebase symbol index below, identify the single best ENTRY POINT symbol — the one function, component, or route handler where this flow starts.
 
 Rules:
-- Return ONLY 5-8 symbols that are DIRECTLY in the execution path
-- Start from the user-facing entry point (page, button handler, route)
-- Follow the call chain: what calls what, in order
-- Do NOT include tangentially related symbols, utilities, or unrelated features
-- Every symbol should call or be called by the next one in the flow
+- Pick ONE symbol that is the starting point a user or request would hit first
+- Prefer page components, route handlers, or top-level functions
+- Do NOT pick utility functions, helpers, or middleware
 
-Return ONLY this JSON format, nothing else:
-{"entry": "entrySymbol", "flow": ["step1", "step2", "step3", "step4", "step5"]}
+Return ONLY this JSON, nothing else:
+{"entry": "symbolName"}
 
 Question: "${question}"
 
@@ -311,170 +309,70 @@ ${symbolIndex}`;
         return;
       }
 
-      // GET /api/explore?q=...&maxNodes=...
-      // Natural language question → semantic or keyword-based subgraph
+      // GET /api/explore?q=...
+      // Find the best entry point, then return its call graph
       if (pathname === '/api/explore') {
         const q = query.q || '';
-        const maxNodes = parseInt(query.maxNodes || '30', 10);
         if (!q) {
-          json({ nodes: [], edges: [], roots: [] });
+          json({ nodes: [], edges: [], roots: [], entryPoint: null });
           return;
         }
 
-        // Extract keywords and stems for relevance scoring (used by all paths)
-        const stopWords = new Set(['how', 'does', 'what', 'the', 'is', 'a', 'an', 'and', 'or', 'in', 'to', 'for', 'of', 'with', 'when', 'do', 'it', 'my', 'work', 'works', 'about']);
-        const keywords = q.toLowerCase()
-          .split(/\s+/)
-          .map(w => w.replace(/[^a-z0-9]/g, ''))
-          .filter(w => w.length >= 2 && !stopWords.has(w));
-
-        const stems = keywords.map(kw => kw.length > 5 ? kw.slice(0, Math.max(4, Math.ceil(kw.length * 0.5))) : kw);
-        const uniqueStems = [...new Set(stems)];
-
-        const _isRelevant = (node: Node): boolean => {
-          const haystack = `${node.name} ${node.filePath} ${node.qualifiedName}`.toLowerCase();
-          return uniqueStems.some(stem => haystack.includes(stem));
-        };
-        void _isRelevant; // Used by keyword fallback when Claude is unavailable
-
-        // Step 1: Find seed nodes
-        const seedMap = new Map<string, Node>();
-        const validKinds: NodeKind[] = ['function', 'method', 'class', 'interface', 'component', 'route'];
-        let usedClaude = false;
-
-        // Try Claude CLI first for intelligent query interpretation
         let entryNodeId: string | null = null;
+        let usedClaude = false;
+        const validKinds: NodeKind[] = ['function', 'method', 'class', 'interface', 'component', 'route'];
+
+        // Try Claude CLI to find the best entry point
         const claudeNames = await this.askClaude(q);
         if (claudeNames && claudeNames.length > 0) {
           usedClaude = true;
+          // Find the entry point in the graph
           for (const name of claudeNames) {
+            if (entryNodeId) break;
             const results = this.cg.searchNodes(name, { kinds: validKinds, limit: 3 });
             for (const r of results) {
-              // Only add if the name is a close match
-              if (r.node.name.toLowerCase().includes(name.toLowerCase()) ||
+              if (r.node.name.toLowerCase() === name.toLowerCase() ||
+                  r.node.name.toLowerCase().includes(name.toLowerCase()) ||
                   name.toLowerCase().includes(r.node.name.toLowerCase())) {
-                seedMap.set(r.node.id, r.node);
-                // First match of first name = entry point
-                if (!entryNodeId && name === claudeNames[0]) {
-                  entryNodeId = r.node.id;
-                }
+                entryNodeId = r.node.id;
+                break;
               }
             }
           }
         }
 
-        // Keyword fallback if Claude unavailable or returned nothing useful
-        if (seedMap.size < 3) {
+        // Keyword fallback: find best match from query keywords
+        if (!entryNodeId) {
+          const stopWords = new Set(['how', 'does', 'what', 'the', 'is', 'a', 'an', 'and', 'or', 'in', 'to', 'for', 'of', 'with', 'when', 'do', 'it', 'my', 'work', 'works', 'about', 'show', 'me']);
+          const keywords = q.toLowerCase().split(/\s+/)
+            .map(w => w.replace(/[^a-z0-9]/g, ''))
+            .filter(w => w.length >= 2 && !stopWords.has(w));
+
           for (const kw of keywords) {
-            const kwResults = this.cg.searchNodes(kw, { kinds: validKinds, limit: 10 });
-            for (const r of kwResults) {
-              seedMap.set(r.node.id, r.node);
+            if (entryNodeId) break;
+            const results = this.cg.searchNodes(kw, { kinds: validKinds, limit: 5 });
+            if (results.length > 0) {
+              entryNodeId = results[0]!.node.id;
             }
           }
-          const fullResults = this.cg.searchNodes(q, { kinds: validKinds, limit: 10 });
-          for (const r of fullResults) {
-            seedMap.set(r.node.id, r.node);
-          }
         }
 
-        if (seedMap.size === 0) {
-          const broad = this.cg.searchNodes(q, { limit: 10 });
-          for (const r of broad) seedMap.set(r.node.id, r.node);
-        }
-
-        if (seedMap.size === 0) {
-          json({ nodes: [], edges: [], roots: [] });
+        if (!entryNodeId) {
+          json({ nodes: [], edges: [], roots: [], entryPoint: null });
           return;
         }
 
-        const rootIds = Array.from(seedMap.keys());
-        const nodeMap = new Map<string, Node>(seedMap);
-        const edgeList: Edge[] = [];
-        const edgeSet = new Set<string>();
+        // Get the call graph from this entry point (depth 3)
+        const callGraph = this.cg.getCallGraph(entryNodeId, 3);
+        const result = serializeSubgraph(callGraph);
 
-        const addEdge = (edge: Edge) => {
-          const ek = `${edge.source}-${edge.kind}-${edge.target}`;
-          if (!edgeSet.has(ek)) { edgeSet.add(ek); edgeList.push(edge); }
-        };
-
-        // Step 2: Find edges between seeds (trust Claude's picks)
-        // Only add non-seed nodes if they bridge two seeds
-        for (const [seedId] of seedMap) {
-          // Check if this seed directly connects to another seed
-          const callees = this.cg.getCallees(seedId, 1);
-          const callers = this.cg.getCallers(seedId, 1);
-          for (const item of [...callees, ...callers]) {
-            if (seedMap.has(item.node.id)) {
-              addEdge(item.edge);
-            }
-          }
-        }
-
-        // Step 3: Bridge pass — for isolated seeds, find shared callees
-        // that connect them to other seeds or to each other
-        const connectedAfterDirect = new Set<string>();
-        for (const e of edgeList) {
-          connectedAfterDirect.add(e.source);
-          connectedAfterDirect.add(e.target);
-        }
-
-        const isolatedSeeds = Array.from(seedMap.keys()).filter(id => !connectedAfterDirect.has(id));
-
-        // Collect all callees/callers of isolated seeds to find bridges
-        const bridgeCandidates = new Map<string, { node: Node; connectedSeeds: Set<string>; edges: Edge[] }>();
-        for (const seedId of isolatedSeeds) {
-          const callees = this.cg.getCallees(seedId, 1);
-          const callers = this.cg.getCallers(seedId, 1);
-          for (const item of [...callees, ...callers]) {
-            const candidate = bridgeCandidates.get(item.node.id);
-            if (candidate) {
-              candidate.connectedSeeds.add(seedId);
-              candidate.edges.push(item.edge);
-            } else {
-              bridgeCandidates.set(item.node.id, {
-                node: item.node,
-                connectedSeeds: new Set([seedId]),
-                edges: [item.edge],
-              });
-            }
-          }
-        }
-
-        // Add bridges that connect 2+ seeds, or connect an isolated seed to a connected one
-        for (const [bridgeId, { node: bridgeNode, connectedSeeds, edges }] of bridgeCandidates) {
-          const connectsToGraph = connectedAfterDirect.has(bridgeId) || seedMap.has(bridgeId);
-          const connectsMultiple = connectedSeeds.size >= 2;
-
-          if ((connectsMultiple || connectsToGraph) && nodeMap.size < maxNodes) {
-            nodeMap.set(bridgeId, bridgeNode);
-            for (const edge of edges) addEdge(edge);
-          }
-        }
-
-        // Step 4: Cross-connection pass — find edges between all result nodes
-        for (const [nodeId] of nodeMap) {
-          const callers = this.cg.getCallers(nodeId, 1);
-          const callees = this.cg.getCallees(nodeId, 1);
-          for (const item of [...callers, ...callees]) {
-            if (nodeMap.has(item.node.id)) {
-              addEdge(item.edge);
-            }
-          }
-        }
-
-        // Step 5: Filter and clean up
-        const finalEdges = edgeList.filter(e => nodeMap.has(e.source) && nodeMap.has(e.target));
-
-        const connectedIds = new Set<string>();
-        for (const e of finalEdges) {
-          connectedIds.add(e.source);
-          connectedIds.add(e.target);
-        }
-        for (const id of rootIds) connectedIds.add(id);
-
-        const finalNodes = Array.from(nodeMap.values()).filter(n => connectedIds.has(n.id));
-
-        json({ nodes: finalNodes, edges: finalEdges, roots: rootIds, entryPoint: entryNodeId, usedClaude });
+        json({
+          nodes: result.nodes,
+          edges: result.edges,
+          roots: [entryNodeId],
+          entryPoint: entryNodeId,
+          usedClaude,
+        });
         return;
       }
 
