@@ -19,10 +19,17 @@ let _tags: Record<string, string> = {};
 /**
  * Initialize Sentry error reporting.
  * Safe to call multiple times — subsequent calls update tags/release.
+ *
+ * Opt out by setting the environment variable CODEGRAPH_TELEMETRY=off
  */
 export function initSentry({ processName, version }: { processName: string; version?: string }) {
   // Skip in development/test environments
   if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return;
+  }
+  // Respect user opt-out
+  const telemetry = process.env.CODEGRAPH_TELEMETRY?.toLowerCase();
+  if (telemetry === 'off' || telemetry === '0' || telemetry === 'false') {
     return;
   }
   _enabled = true;

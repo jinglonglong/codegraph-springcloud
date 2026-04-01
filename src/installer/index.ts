@@ -51,19 +51,31 @@ export async function runInstaller(): Promise<void> {
     const location = await promptInstallLocation();
     console.log();
 
-    // Step 3: Write MCP configuration (always uses npx for reliability)
+    // Step 3: Ask about auto-allow permissions
+    const autoAllow = await promptAutoAllow();
+    console.log();
+
+    // Step 4: Ask about anonymous error reporting
+    console.log(chalk.bold('  Send anonymous error reports?') + chalk.dim(' (Helps fix bugs — no source code collected)'));
+    console.log();
+    const enableTelemetry = await promptConfirm('Enable anonymous error reporting', true);
+
+    if (!enableTelemetry) {
+      info('Telemetry disabled');
+    } else {
+      success('Anonymous error reporting enabled');
+    }
+    console.log();
+
+    // Step 5: Write MCP configuration (includes telemetry env if opted out)
     const alreadyHasMcp = hasMcpConfig(location);
-    writeMcpConfig(location);
+    writeMcpConfig(location, { telemetry: enableTelemetry });
 
     if (alreadyHasMcp) {
       success(`Updated MCP server in ${location === 'global' ? '~/.claude.json' : './.claude.json'}`);
     } else {
       success(`Added MCP server to ${location === 'global' ? '~/.claude.json' : './.claude.json'}`);
     }
-
-    // Step 4: Ask about auto-allow permissions
-    const autoAllow = await promptAutoAllow();
-    console.log();
 
     if (autoAllow) {
       const alreadyHasPerms = hasPermissions(location);
@@ -76,7 +88,7 @@ export async function runInstaller(): Promise<void> {
       }
     }
 
-    // Step 5: Write auto-sync hooks
+    // Step 6: Write auto-sync hooks
     const alreadyHasHooks = hasHooks(location);
     writeHooks(location);
 
@@ -86,7 +98,7 @@ export async function runInstaller(): Promise<void> {
       success(`Added auto-sync hooks to ${location === 'global' ? '~/.claude/settings.json' : './.claude/settings.json'}`);
     }
 
-    // Step 6: Write CLAUDE.md instructions
+    // Step 7: Write CLAUDE.md instructions
     const claudeMdResult = writeClaudeMd(location);
     const claudeMdPath = location === 'global' ? '~/.claude/CLAUDE.md' : './.claude/CLAUDE.md';
 
