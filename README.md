@@ -4,7 +4,7 @@
 
 ### Supercharge Claude Code with Semantic Code Intelligence
 
-**30% fewer tokens • 25% fewer tool calls • 100% local**
+**94% fewer tool calls • 77% faster exploration • 100% local**
 
 [![npm version](https://img.shields.io/npm/v/@colbymchenry/codegraph.svg)](https://www.npmjs.com/package/@colbymchenry/codegraph)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -36,33 +36,41 @@ When you ask Claude Code to work on a complex task, it spawns **Explore agents**
 
 ### 📊 Benchmark Results
 
-We ran the same complex task 3 times with and without CodeGraph:
+We tested the same exploration queries across 4 real-world codebases in different languages, comparing Claude Code's Explore agent **with** and **without** CodeGraph:
 
-| Metric | Without CodeGraph | With CodeGraph | Improvement |
-|--------|-------------------|----------------|-------------|
-| **Explore tokens** | 157.8k | 111.7k | **29% fewer** |
-| **Per-agent tokens** | 74.0k | 46.4k | **37% fewer** |
-| **Tool calls** | 60 | 45 | **25% fewer** |
-| **Main context usage** | 28.7% | 24.0% | **4.7% less** |
+| Codebase | Language | Query | With CG | Without CG | Tool Calls | Time Saved |
+|----------|----------|-------|---------|-----------|------------|------------|
+| **VS Code** | TypeScript | "How does the extension host communicate with the main process?" | 3 calls, 17s | 52 calls, 1m 37s | **94% fewer** | **82% faster** |
+| **Excalidraw** | TypeScript | "How does collaborative editing and real-time sync work?" | 3 calls, 29s | 47 calls, 1m 45s | **94% fewer** | **72% faster** |
+| **Claude Code** | Python + Rust | "How does tool execution work end to end?" | 3 calls, 39s | 40 calls, 1m 8s | **93% fewer** | **43% faster** |
+| **Claude Code** | Java | "How does tool execution work end to end?" | 1 call, 19s | 26 calls, 1m 22s | **96% fewer** | **77% faster** |
 
 <details>
-<summary><strong>Full benchmark data</strong></summary>
+<summary><strong>Full benchmark details</strong></summary>
 
-**With CodeGraph:**
-| Test | Agents | Tool Uses | Explore Tokens | Plan Tokens | Time |
-|------|--------|-----------|----------------|-------------|------|
-| 1 | 3 | 54 | 149.7k | 76.4k | 1m 43s |
-| 2 | 2 | 41 | 102.1k | 74.8k | 1m 29s |
-| 3 | 2 | 40 | 83.3k | 63.3k | 1m 25s |
-| **Avg** | **2.3** | **45** | **111.7k** | **71.5k** | **1m 32s** |
+All tests used Claude Opus 4.6 (1M context) with Claude Code v2.1.91. Each test spawned a single Explore agent with the same question.
 
-**Without CodeGraph:**
-| Test | Agents | Tool Uses | Explore Tokens | Plan Tokens | Time |
-|------|--------|-----------|----------------|-------------|------|
-| 1 | 3 | 74 | 177.3k | 80.5k | 1m 54s |
-| 2 | 2 | 55 | 149.3k | 64.0k | 1m 27s |
-| 3 | 2 | 51 | 146.7k | 62.3k | 1m 17s |
-| **Avg** | **2.3** | **60** | **157.8k** | **68.9k** | **1m 33s** |
+**With CodeGraph — the agent uses `codegraph_explore` and stops:**
+| Codebase | Files Indexed | Nodes | Tool Uses | Tokens | Time | File Reads |
+|----------|--------------|-------|-----------|--------|------|------------|
+| VS Code (TypeScript) | 4,002 | 59,377 | 3 | 56.6k | 17s | 0 |
+| Excalidraw (TypeScript) | 626 | 9,859 | 3 | 57.1k | 29s | 0 |
+| Claude Code (Python+Rust) | 115 | 3,080 | 3 | 67.1k | 39s | 0 |
+| Claude Code (Java) | — | — | 1 | 40.8k | 19s | 0 |
+
+**Without CodeGraph — the agent uses grep, find, ls, and Read extensively:**
+| Codebase | Tool Uses | Tokens | Time | File Reads |
+|----------|-----------|--------|------|------------|
+| VS Code (TypeScript) | 52 | 89.4k | 1m 37s | ~15 |
+| Excalidraw (TypeScript) | 47 | 77.9k | 1m 45s | ~20 |
+| Claude Code (Python+Rust) | 40 | 69.3k | 1m 8s | ~15 |
+| Claude Code (Java) | 26 | 73.3k | 1m 22s | ~15 |
+
+**Key observations:**
+- With CodeGraph, the agent **never fell back to reading files** — it trusted the codegraph_explore results completely
+- Without CodeGraph, agents spent most of their time on discovery (find, ls, grep) before they could even start reading relevant code
+- The Java codebase needed only **1 codegraph_explore call** to answer the entire question
+- Cross-language queries (Python+Rust) worked seamlessly — CodeGraph's graph traversal found connections across language boundaries
 
 </details>
 
@@ -239,26 +247,25 @@ CodeGraph builds a semantic knowledge graph of codebases for faster, smarter cod
 
 ### If `.codegraph/` exists in the project
 
-**Use codegraph tools for faster exploration.** These tools provide instant lookups via the code graph instead of scanning files:
+**NEVER call `codegraph_explore` or `codegraph_context` directly in the main session.** These tools return large amounts of source code that fills up main session context. Instead, ALWAYS spawn an Explore agent for any exploration question (e.g., "how does X work?", "explain the Y system", "where is Z implemented?").
+
+**When spawning Explore agents**, include this instruction in the prompt:
+
+> This project has CodeGraph initialized (.codegraph/ exists). Use `codegraph_explore` as your PRIMARY tool — it returns full source code sections from all relevant files in one call.
+>
+> **Rules:**
+> 1. Make at most 3 `codegraph_explore` calls — one broad query, then up to 2 focused follow-ups.
+> 2. Do NOT re-read files that codegraph_explore already returned source code for. The source sections are complete and authoritative.
+> 3. Only fall back to grep/glob/read for files listed under "Additional relevant files" if you need more detail, or if codegraph returned no results.
+
+**The main session may only use these lightweight tools directly** (for targeted lookups before making edits, not for exploration):
 
 | Tool | Use For |
 |------|---------|
-| `codegraph_search` | Find symbols by name (functions, classes, types) |
-| `codegraph_context` | Get relevant code context for a task |
-| `codegraph_callers` | Find what calls a function |
-| `codegraph_callees` | Find what a function calls |
-| `codegraph_impact` | See what's affected by changing a symbol |
-| `codegraph_node` | Get details + source code for a symbol |
-| `codegraph_files` | Get project file structure from the index |
-
-**When spawning Explore agents in a codegraph-enabled project:**
-
-Tell the Explore agent to use codegraph tools for faster exploration.
-
-**For quick lookups in the main session:**
-- Use `codegraph_search` instead of grep for finding symbols
-- Use `codegraph_callers`/`codegraph_callees` to trace code flow
-- Use `codegraph_impact` before making changes to see what's affected
+| `codegraph_search` | Find symbols by name |
+| `codegraph_callers` / `codegraph_callees` | Trace call flow |
+| `codegraph_impact` | Check what's affected before editing |
+| `codegraph_node` | Get a single symbol's details |
 
 ### If `.codegraph/` does NOT exist
 
@@ -523,7 +530,7 @@ Claude's **Explore agents** use these tools instead of grep/glob/Read for faster
 | Guessing impact | `codegraph_impact(symbol)` | Know what breaks |
 | `Glob`/`find` scanning | `codegraph_files(path)` | Indexed file structure |
 
-This hybrid approach gives you **~30% fewer tokens** and **~25% fewer tool calls** while letting Claude's native agents handle synthesis.
+This gives Explore agents **~94% fewer tool calls** and **~77% faster exploration** while producing equally thorough answers.
 
 ## 📚 Library Usage
 
