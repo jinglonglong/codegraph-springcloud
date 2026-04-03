@@ -157,12 +157,9 @@ export class CodeGraph {
     this.resolver = createResolver(projectRoot, queries);
     this.graphManager = new GraphQueryManager(queries);
     this.traverser = new GraphTraverser(queries);
-    // Vector manager is created lazily when embeddings are enabled
-    // Uses global ~/.codegraph/models directory for shared embedding models
-    if (config.enableEmbeddings) {
-      this.vectorManager = createVectorManager(db.getDb(), queries, {});
-    }
-    // Context builder (uses vector manager if available)
+    // Vector manager — always created, embeddings generated lazily on first use
+    this.vectorManager = createVectorManager(db.getDb(), queries, {});
+    // Context builder (uses vector manager for semantic search)
     this.contextBuilder = createContextBuilder(
       projectRoot,
       queries,

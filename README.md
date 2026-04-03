@@ -645,8 +645,7 @@ The `.codegraph/config.json` file controls indexing behavior:
   "frameworks": [],
   "maxFileSize": 1048576,
   "extractDocstrings": true,
-  "trackCallSites": true,
-  "enableEmbeddings": false
+  "trackCallSites": true
 }
 ```
 
@@ -660,7 +659,6 @@ The `.codegraph/config.json` file controls indexing behavior:
 | `maxFileSize` | Skip files larger than this (bytes) | `1048576` (1MB) |
 | `extractDocstrings` | Whether to extract docstrings from code | `true` |
 | `trackCallSites` | Whether to track call site locations | `true` |
-| `enableEmbeddings` | Enable semantic search embeddings | `false` |
 
 ## 🌐 Supported Languages
 

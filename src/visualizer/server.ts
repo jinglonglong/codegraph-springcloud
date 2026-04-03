@@ -236,16 +236,14 @@ ${symbolIndex}`;
 
       // GET /api/embeddings/status
       if (pathname === '/api/embeddings/status') {
-        const config = this.cg.getConfig();
         const embeddingStats = this.cg.getEmbeddingStats();
-        const isEnabled = config.enableEmbeddings === true;
         const isInitialized = this.cg.isEmbeddingsInitialized();
         const totalVectors = embeddingStats?.totalVectors ?? 0;
         const stats = this.cg.getStats();
         // Consider ready if we have vectors for at least half the eligible nodes
         const eligibleNodes = stats.nodeCount - (stats.nodesByKind.file ?? 0) - (stats.nodesByKind.import ?? 0);
-        const isReady = isEnabled && totalVectors > 0 && totalVectors >= eligibleNodes * 0.5;
-        json({ isEnabled, isInitialized, isReady, totalVectors, eligibleNodes });
+        const isReady = totalVectors > 0 && totalVectors >= eligibleNodes * 0.5;
+        json({ isEnabled: true, isInitialized, isReady, totalVectors, eligibleNodes });
         return;
       }
 
@@ -262,14 +260,7 @@ ${symbolIndex}`;
         };
 
         try {
-          // Step 1: Enable embeddings in config
-          send('status', { phase: 'config', message: 'Enabling embeddings...' });
-          const config = this.cg.getConfig();
-          if (!config.enableEmbeddings) {
-            this.cg.updateConfig({ enableEmbeddings: true });
-          }
-
-          // Step 2: Initialize embedding model (downloads on first use)
+          // Step 1: Initialize embedding model (downloads on first use)
           send('status', { phase: 'model', message: 'Loading embedding model (first time may download ~30MB)...' });
           await this.cg.initializeEmbeddings();
           send('status', { phase: 'model', message: 'Embedding model ready' });

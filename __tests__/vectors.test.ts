@@ -286,9 +286,10 @@ export function processData(input: string): string {
       expect(cg.isEmbeddingsInitialized()).toBe(false);
     });
 
-    it('should return null embedding stats when not initialized', () => {
+    it('should return embedding stats even before initialization', () => {
       const stats = cg.getEmbeddingStats();
-      expect(stats).toBeNull();
+      expect(stats).not.toBeNull();
+      expect(stats!.totalVectors).toBe(0);
     });
 
     it('should throw when calling semanticSearch without initialization', async () => {
