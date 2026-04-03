@@ -926,6 +926,23 @@ export class QueryBuilder {
     this.db.prepare(`DELETE FROM unresolved_refs WHERE from_node_id IN (${placeholders})`).run(...fromNodeIds);
   }
 
+  /**
+   * Delete specific resolved references by (fromNodeId, referenceName, referenceKind) tuples.
+   * More precise than deleteResolvedReferences — only removes refs that were actually resolved.
+   */
+  deleteSpecificResolvedReferences(refs: Array<{ fromNodeId: string; referenceName: string; referenceKind: string }>): void {
+    if (refs.length === 0) return;
+    const stmt = this.db.prepare(
+      'DELETE FROM unresolved_refs WHERE from_node_id = ? AND reference_name = ? AND reference_kind = ?'
+    );
+    const deleteMany = this.db.transaction((items: typeof refs) => {
+      for (const ref of items) {
+        stmt.run(ref.fromNodeId, ref.referenceName, ref.referenceKind);
+      }
+    });
+    deleteMany(refs);
+  }
+
   // ===========================================================================
   // Statistics
   // ===========================================================================

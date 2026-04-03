@@ -5,7 +5,7 @@
  */
 
 import CodeGraph, { findNearestCodeGraphRoot } from '../index';
-import type { Node, SearchResult, Subgraph, TaskContext, NodeKind } from '../types';
+import type { Node, Edge, SearchResult, Subgraph, TaskContext, NodeKind } from '../types';
 import { createHash } from 'crypto';
 import { writeFileSync } from 'fs';
 import { clamp } from '../utils';
@@ -475,19 +475,28 @@ export class ToolHandler {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const limit = clamp((args.limit as number) || 20, 1, 100);
 
-    const match = this.findSymbol(cg, symbol);
-    if (!match) {
+    const allMatches = this.findAllSymbols(cg, symbol);
+    if (allMatches.nodes.length === 0) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const callers = cg.getCallers(match.node.id);
-
-    if (callers.length === 0) {
-      return this.textResult(`No callers found for "${symbol}"${match.note}`);
+    // Aggregate callers across all matching symbols
+    const seen = new Set<string>();
+    const allCallers: Node[] = [];
+    for (const node of allMatches.nodes) {
+      for (const c of cg.getCallers(node.id)) {
+        if (!seen.has(c.node.id)) {
+          seen.add(c.node.id);
+          allCallers.push(c.node);
+        }
+      }
     }
 
-    const callerNodes = callers.slice(0, limit).map(c => c.node);
-    const formatted = this.formatNodeList(callerNodes, `Callers of ${symbol}`) + match.note;
+    if (allCallers.length === 0) {
+      return this.textResult(`No callers found for "${symbol}"${allMatches.note}`);
+    }
+
+    const formatted = this.formatNodeList(allCallers.slice(0, limit), `Callers of ${symbol}`) + allMatches.note;
     return this.textResult(this.truncateOutput(formatted));
   }
 
@@ -501,19 +510,28 @@ export class ToolHandler {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const limit = clamp((args.limit as number) || 20, 1, 100);
 
-    const match = this.findSymbol(cg, symbol);
-    if (!match) {
+    const allMatches = this.findAllSymbols(cg, symbol);
+    if (allMatches.nodes.length === 0) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const callees = cg.getCallees(match.node.id);
-
-    if (callees.length === 0) {
-      return this.textResult(`No callees found for "${symbol}"${match.note}`);
+    // Aggregate callees across all matching symbols
+    const seen = new Set<string>();
+    const allCallees: Node[] = [];
+    for (const node of allMatches.nodes) {
+      for (const c of cg.getCallees(node.id)) {
+        if (!seen.has(c.node.id)) {
+          seen.add(c.node.id);
+          allCallees.push(c.node);
+        }
+      }
     }
 
-    const calleeNodes = callees.slice(0, limit).map(c => c.node);
-    const formatted = this.formatNodeList(calleeNodes, `Callees of ${symbol}`) + match.note;
+    if (allCallees.length === 0) {
+      return this.textResult(`No callees found for "${symbol}"${allMatches.note}`);
+    }
+
+    const formatted = this.formatNodeList(allCallees.slice(0, limit), `Callees of ${symbol}`) + allMatches.note;
     return this.textResult(this.truncateOutput(formatted));
   }
 
@@ -527,14 +545,37 @@ export class ToolHandler {
     const cg = this.getCodeGraph(args.projectPath as string | undefined);
     const depth = clamp((args.depth as number) || 2, 1, 10);
 
-    const match = this.findSymbol(cg, symbol);
-    if (!match) {
+    const allMatches = this.findAllSymbols(cg, symbol);
+    if (allMatches.nodes.length === 0) {
       return this.textResult(`Symbol "${symbol}" not found in the codebase`);
     }
 
-    const impact = cg.getImpactRadius(match.node.id, depth);
+    // Aggregate impact across all matching symbols
+    const mergedNodes = new Map<string, Node>();
+    const mergedEdges: Edge[] = [];
+    const seenEdges = new Set<string>();
 
-    const formatted = this.formatImpact(symbol, impact) + match.note;
+    for (const node of allMatches.nodes) {
+      const impact = cg.getImpactRadius(node.id, depth);
+      for (const [id, n] of impact.nodes) {
+        mergedNodes.set(id, n);
+      }
+      for (const e of impact.edges) {
+        const key = `${e.source}->${e.target}:${e.kind}`;
+        if (!seenEdges.has(key)) {
+          seenEdges.add(key);
+          mergedEdges.push(e);
+        }
+      }
+    }
+
+    const mergedImpact = {
+      nodes: mergedNodes,
+      edges: mergedEdges,
+      roots: allMatches.nodes.map(n => n.id),
+    };
+
+    const formatted = this.formatImpact(symbol, mergedImpact) + allMatches.note;
     return this.textResult(this.truncateOutput(formatted));
   }
 
@@ -820,6 +861,31 @@ export class ToolHandler {
 
     // No exact match, use best fuzzy match
     return { node: results[0]!.node, note: '' };
+  }
+
+  /**
+   * Find ALL symbols matching a name. Used by callers/callees/impact to aggregate
+   * results across all matching symbols (e.g., multiple classes with an `execute` method).
+   */
+  private findAllSymbols(cg: CodeGraph, symbol: string): { nodes: Node[]; note: string } {
+    const results = cg.searchNodes(symbol, { limit: 50 });
+
+    if (results.length === 0) {
+      return { nodes: [], note: '' };
+    }
+
+    const exactMatches = results.filter(r => r.node.name === symbol);
+
+    if (exactMatches.length <= 1) {
+      const node = exactMatches[0]?.node ?? results[0]!.node;
+      return { nodes: [node], note: '' };
+    }
+
+    const locations = exactMatches.map(r =>
+      `${r.node.kind} at ${r.node.filePath}:${r.node.startLine}`
+    );
+    const note = `\n\n> **Note:** Aggregated results across ${exactMatches.length} symbols named "${symbol}": ${locations.join(', ')}`;
+    return { nodes: exactMatches.map(r => r.node), note };
   }
 
   /**

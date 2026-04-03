@@ -483,6 +483,25 @@ export class GraphTraverser {
     }
     visited.add(nodeId);
 
+    // For container nodes (classes, interfaces, structs, etc.), also traverse
+    // into their children so that callers of contained methods appear in impact
+    const focalNode = this.queries.getNodeById(nodeId);
+    if (focalNode) {
+      const containerKinds = new Set(['class', 'interface', 'struct', 'trait', 'protocol', 'module', 'enum']);
+      if (containerKinds.has(focalNode.kind)) {
+        const containsEdges = this.queries.getOutgoingEdges(nodeId, ['contains']);
+        for (const edge of containsEdges) {
+          const childNode = this.queries.getNodeById(edge.target);
+          if (childNode && !visited.has(childNode.id)) {
+            nodes.set(childNode.id, childNode);
+            edges.push(edge);
+            // Recurse into children at the same depth (they're part of the same symbol)
+            this.getImpactRecursive(childNode.id, maxDepth, currentDepth, nodes, edges, visited);
+          }
+        }
+      }
+    }
+
     // Get all incoming edges (things that depend on this node)
     const incomingEdges = this.queries.getIncomingEdges(nodeId);
 

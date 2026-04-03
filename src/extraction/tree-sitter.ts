@@ -1325,10 +1325,14 @@ export class TreeSitterExtractor {
     let kind: NodeKind = 'interface';
     if (this.language === 'rust') kind = 'trait';
 
-    this.createNode(kind, name, node, {
+    const interfaceNode = this.createNode(kind, name, node, {
       docstring,
       isExported,
     });
+    if (!interfaceNode) return;
+
+    // Extract extends (interface inheritance)
+    this.extractInheritance(node, interfaceNode.id);
   }
 
   /**
@@ -1754,6 +1758,19 @@ export class TreeSitterExtractor {
           signature: importText,
         });
       }
+      // Create unresolved reference for import resolution before returning
+      if (moduleName && this.nodeStack.length > 0) {
+        const parentId = this.nodeStack[this.nodeStack.length - 1];
+        if (parentId) {
+          this.unresolvedReferences.push({
+            fromNodeId: parentId,
+            referenceName: moduleName,
+            referenceKind: 'imports',
+            line: node.startPosition.row + 1,
+            column: node.startPosition.column,
+          });
+        }
+      }
       return; // Java handled completely above
     } else if (this.language === 'csharp') {
       // C# using directives: using System, using System.Collections.Generic, using static X, using Alias = X
@@ -1960,20 +1977,36 @@ export class TreeSitterExtractor {
 
     // Get the function/method being called
     let calleeName = '';
-    const func = getChildByField(node, 'function') || node.namedChild(0);
 
-    if (func) {
-      if (func.type === 'member_expression' || func.type === 'attribute') {
-        // Method call: obj.method()
-        const property = getChildByField(func, 'property') || func.namedChild(1);
-        if (property) {
-          calleeName = getNodeText(property, this.source);
+    // Java/Kotlin method_invocation has 'object' + 'name' fields instead of 'function'
+    const nameField = getChildByField(node, 'name');
+    const objectField = getChildByField(node, 'object');
+
+    if (nameField && objectField && node.type === 'method_invocation') {
+      // Java-style method call: receiver.method()
+      const methodName = getNodeText(nameField, this.source);
+      const receiverName = getNodeText(objectField, this.source);
+
+      if (methodName) {
+        // Emit receiver.method form for qualified resolution
+        calleeName = `${receiverName}.${methodName}`;
+      }
+    } else {
+      const func = getChildByField(node, 'function') || node.namedChild(0);
+
+      if (func) {
+        if (func.type === 'member_expression' || func.type === 'attribute') {
+          // Method call: obj.method()
+          const property = getChildByField(func, 'property') || func.namedChild(1);
+          if (property) {
+            calleeName = getNodeText(property, this.source);
+          }
+        } else if (func.type === 'scoped_identifier' || func.type === 'scoped_call_expression') {
+          // Scoped call: Module::function()
+          calleeName = getNodeText(func, this.source);
+        } else {
+          calleeName = getNodeText(func, this.source);
         }
-      } else if (func.type === 'scoped_identifier' || func.type === 'scoped_call_expression') {
-        // Scoped call: Module::function()
-        calleeName = getNodeText(func, this.source);
-      } else {
-        calleeName = getNodeText(func, this.source);
       }
     }
 
@@ -2023,30 +2056,38 @@ export class TreeSitterExtractor {
       if (
         child.type === 'extends_clause' ||
         child.type === 'class_heritage' ||
-        child.type === 'superclass'
+        child.type === 'superclass' ||
+        child.type === 'extends_interfaces' // Java interface extends
       ) {
-        // Extract parent class name
-        const superclass = child.namedChild(0);
-        if (superclass) {
-          const name = getNodeText(superclass, this.source);
-          this.unresolvedReferences.push({
-            fromNodeId: classId,
-            referenceName: name,
-            referenceKind: 'extends',
-            line: child.startPosition.row + 1,
-            column: child.startPosition.column,
-          });
+        // Extract parent class/interface names
+        // Java uses type_list wrapper: superclass -> type_identifier, extends_interfaces -> type_list -> type_identifier
+        const typeList = child.namedChildren.find((c: SyntaxNode) => c.type === 'type_list');
+        const targets = typeList ? typeList.namedChildren : [child.namedChild(0)];
+        for (const target of targets) {
+          if (target) {
+            const name = getNodeText(target, this.source);
+            this.unresolvedReferences.push({
+              fromNodeId: classId,
+              referenceName: name,
+              referenceKind: 'extends',
+              line: target.startPosition.row + 1,
+              column: target.startPosition.column,
+            });
+          }
         }
       }
 
       if (
         child.type === 'implements_clause' ||
         child.type === 'class_interface_clause' ||
+        child.type === 'super_interfaces' || // Java class implements
         child.type === 'interfaces' // Dart
       ) {
         // Extract implemented interfaces
-        for (let j = 0; j < child.namedChildCount; j++) {
-          const iface = child.namedChild(j);
+        // Java uses type_list wrapper: super_interfaces -> type_list -> type_identifier
+        const typeList = child.namedChildren.find((c: SyntaxNode) => c.type === 'type_list');
+        const targets = typeList ? typeList.namedChildren : child.namedChildren;
+        for (const iface of targets) {
           if (iface) {
             const name = getNodeText(iface, this.source);
             this.unresolvedReferences.push({
