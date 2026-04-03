@@ -19,9 +19,6 @@ import * as path from 'path';
 import CodeGraph, { findNearestCodeGraphRoot } from '../index';
 import { StdioTransport, JsonRpcRequest, JsonRpcNotification, ErrorCodes } from './transport';
 import { tools, ToolHandler } from './tools';
-import { initSentry, captureException } from '../sentry';
-
-initSentry({ processName: 'codegraph-mcp' });
 
 /**
  * Convert a file:// URI to a filesystem path.
@@ -121,7 +118,6 @@ export class MCPServer {
       this.toolHandler.setDefaultCodeGraph(this.cg);
     } catch (err) {
       // Log the error so transient failures are diagnosable (see issue #47)
-      captureException(err);
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[CodeGraph MCP] Failed to open project at ${resolvedRoot}: ${msg}\n`);
     }

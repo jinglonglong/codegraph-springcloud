@@ -240,16 +240,6 @@ export class QueryBuilder {
         updatedAt: node.updatedAt ?? Date.now(),
       });
     } catch (error) {
-      const { captureException } = require('../sentry');
-      captureException(error, {
-        operation: 'insertNode',
-        nodeId: node.id,
-        nodeKind: node.kind,
-        nodeName: node.name,
-        filePath: node.filePath,
-        language: node.language,
-        startLine: node.startLine,
-      });
       throw error;
     }
   }

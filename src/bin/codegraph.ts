@@ -28,7 +28,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
 import { getCodeGraphDir, findNearestCodeGraphRoot, isInitialized } from '../directory';
-import { initSentry, captureException } from '../sentry';
 
 // Lazy-load heavy modules (CodeGraph, runInstaller) to keep CLI startup fast.
 async function loadCodeGraph(): Promise<typeof import('../index')> {
@@ -47,19 +46,10 @@ async function loadCodeGraph(): Promise<typeof import('../index')> {
 type IndexProgress = import('../index').IndexProgress;
 
 // Check if running with no arguments - run installer
-// Read version for Sentry release tag
-const pkgVersion = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8')).version;
-  } catch { return undefined; }
-})();
-initSentry({ processName: 'codegraph-cli', version: pkgVersion });
-
 if (process.argv.length === 2) {
   import('../installer').then(({ runInstaller }) =>
     runInstaller()
   ).catch((err) => {
-    captureException(err);
     console.error('Installation failed:', err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
@@ -69,12 +59,10 @@ if (process.argv.length === 2) {
 }
 
 process.on('uncaughtException', (error) => {
-  captureException(error);
   console.error('[CodeGraph] Uncaught exception:', error);
 });
 
 process.on('unhandledRejection', (reason) => {
-  captureException(reason);
   console.error('[CodeGraph] Unhandled rejection:', reason);
 });
 
@@ -296,7 +284,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Failed to initialize: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -342,7 +329,6 @@ program
 
       success(`Removed CodeGraph from ${projectPath}`);
     } catch (err) {
-      captureException(err);
       error(`Failed to uninitialize: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -411,7 +397,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Failed to index: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -469,7 +454,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       if (!options.quiet) {
         error(`Failed to sync: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -581,7 +565,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Failed to get status: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -644,7 +627,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -770,7 +752,6 @@ program
       console.log();
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Failed to list files: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -898,7 +879,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Failed to build context: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -949,7 +929,6 @@ program
         console.error(chalk.cyan('  codegraph_status') + '    - Get index status');
       }
     } catch (err) {
-      captureException(err);
       error(`Failed to start server: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -1013,7 +992,6 @@ program
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);
     } catch (err) {
-      captureException(err);
       error(`Failed to start visualizer: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -1126,7 +1104,6 @@ program
       fs.unlinkSync(lockPath);
       success('Removed lock file. You can now run indexing again.');
     } catch (err) {
-      captureException(err);
       error(`Failed to remove lock: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
@@ -1265,7 +1242,6 @@ program
 
       cg.destroy();
     } catch (err) {
-      captureException(err);
       error(`Affected analysis failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }

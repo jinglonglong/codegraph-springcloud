@@ -20,7 +20,6 @@ import { QueryBuilder } from '../db/queries';
 import { extractFromSource } from './tree-sitter';
 import { detectLanguage, isLanguageSupported, initGrammars, loadGrammarsForLanguages } from './grammars';
 import { logDebug, logWarn } from '../errors';
-import { captureException } from '../sentry';
 import { validatePathWithinRoot, normalizePath } from '../utils';
 import picomatch from 'picomatch';
 
@@ -257,7 +256,6 @@ function scanDirectoryWalk(
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch (error) {
-      captureException(error, { operation: 'walk-directory', dir });
       logDebug('Skipping unreadable directory', { dir, error: String(error) });
       return;
     }
@@ -548,7 +546,6 @@ export class ExtractionOrchestrator {
       stats = await fsp.stat(fullPath);
       content = await fsp.readFile(fullPath, 'utf-8');
     } catch (error) {
-      captureException(error, { operation: 'extract-file', filePath: fullPath });
       return {
         nodes: [],
         edges: [],
@@ -744,7 +741,6 @@ export class ExtractionOrchestrator {
         try {
           content = fs.readFileSync(fullPath, 'utf-8');
         } catch (error) {
-          captureException(error, { operation: 'sync-read-file', filePath });
           logDebug('Skipping unreadable file during sync', { filePath, error: String(error) });
           continue;
         }
@@ -796,7 +792,6 @@ export class ExtractionOrchestrator {
         try {
           content = fs.readFileSync(fullPath, 'utf-8');
         } catch (error) {
-          captureException(error, { operation: 'sync-read-file', filePath });
           logDebug('Skipping unreadable file during sync', { filePath, error: String(error) });
           continue;
         }
@@ -876,7 +871,6 @@ export class ExtractionOrchestrator {
         try {
           content = fs.readFileSync(fullPath, 'utf-8');
         } catch (error) {
-          captureException(error, { operation: 'detect-changes-read-file', filePath });
           logDebug('Skipping unreadable file while detecting changes', { filePath, error: String(error) });
           continue;
         }
@@ -927,7 +921,6 @@ export class ExtractionOrchestrator {
       try {
         content = fs.readFileSync(fullPath, 'utf-8');
       } catch (error) {
-        captureException(error, { operation: 'detect-changes-read-file', filePath });
         logDebug('Skipping unreadable file while detecting changes', { filePath, error: String(error) });
         continue;
       }

@@ -55,21 +55,9 @@ export async function runInstaller(): Promise<void> {
     const autoAllow = await promptAutoAllow();
     console.log();
 
-    // Step 4: Ask about anonymous error reporting
-    console.log(chalk.bold('  Send anonymous error reports?') + chalk.dim(' (Helps fix bugs — no source code collected)'));
-    console.log();
-    const enableTelemetry = await promptConfirm('Enable anonymous error reporting', true);
-
-    if (!enableTelemetry) {
-      info('Telemetry disabled');
-    } else {
-      success('Anonymous error reporting enabled');
-    }
-    console.log();
-
-    // Step 5: Write MCP configuration (includes telemetry env if opted out)
+    // Step 4: Write MCP configuration
     const alreadyHasMcp = hasMcpConfig(location);
-    writeMcpConfig(location, { telemetry: enableTelemetry });
+    writeMcpConfig(location);
 
     if (alreadyHasMcp) {
       success(`Updated MCP server in ${location === 'global' ? '~/.claude.json' : './.claude.json'}`);

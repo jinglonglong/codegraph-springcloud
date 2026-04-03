@@ -370,7 +370,6 @@ export class ToolHandler {
           return this.errorResult(`Unknown tool: ${toolName}`);
       }
     } catch (err) {
-      try { const { captureException } = require('../sentry'); captureException(err, { tool: toolName }); } catch {}
       return this.errorResult(`Tool execution failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

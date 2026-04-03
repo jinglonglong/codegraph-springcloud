@@ -78,7 +78,6 @@ src/
 │   ├── index.ts          # MCPServer class
 │   ├── tools.ts          # MCP tool definitions
 │   └── transport.ts      # Stdio transport
-├── sentry.ts             # Error tracking/reporting
 └── bin/codegraph.ts      # CLI entry point
 ```
 

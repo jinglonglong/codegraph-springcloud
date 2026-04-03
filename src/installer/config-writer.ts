@@ -100,22 +100,18 @@ function writeJsonFile(filePath: string, data: Record<string, any>): void {
 /**
  * Get the MCP server configuration
  */
-function getMcpServerConfig(options?: { telemetry?: boolean }): Record<string, any> {
-  const config: Record<string, any> = {
+function getMcpServerConfig(): Record<string, any> {
+  return {
     type: 'stdio',
     command: 'codegraph',
     args: ['serve', '--mcp'],
   };
-  if (options?.telemetry === false) {
-    config.env = { CODEGRAPH_TELEMETRY: 'off' };
-  }
-  return config;
 }
 
 /**
  * Write the MCP server configuration to claude.json
  */
-export function writeMcpConfig(location: InstallLocation, options?: { telemetry?: boolean }): void {
+export function writeMcpConfig(location: InstallLocation): void {
   const claudeJsonPath = getClaudeJsonPath(location);
   const config = readJsonFile(claudeJsonPath);
 
@@ -125,7 +121,7 @@ export function writeMcpConfig(location: InstallLocation, options?: { telemetry?
   }
 
   // Add or update codegraph server
-  config.mcpServers.codegraph = getMcpServerConfig(options);
+  config.mcpServers.codegraph = getMcpServerConfig();
 
   writeJsonFile(claudeJsonPath, config);
 }

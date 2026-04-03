@@ -165,7 +165,6 @@ The interactive installer will:
 - Prompt to install `codegraph` globally (needed for hooks & MCP server to work)
 - Configure the MCP server in `~/.claude.json`
 - Set up auto-allow permissions for CodeGraph tools
-- Ask about [anonymous error reporting](#-telemetry) (opt-out available)
 - Add global instructions to `~/.claude/CLAUDE.md` (teaches Claude how to use CodeGraph)
 - Install Claude Code hooks for automatic index syncing
 - Optionally initialize your current project
@@ -311,11 +310,10 @@ The installer will:
 1. Prompt to install `codegraph` globally (needed for hooks & MCP server)
 2. Ask for installation location (global `~/.claude` or local `./.claude`)
 3. Optionally set up auto-allow permissions
-4. Ask about [anonymous error reporting](#-telemetry) (opt-out available)
-5. Configure the MCP server in `claude.json`
-6. Add global instructions to `~/.claude/CLAUDE.md` (teaches Claude how to use CodeGraph)
-7. Install Claude Code hooks for automatic index syncing
-8. For local installs: initialize and index the current project
+4. Configure the MCP server in `claude.json`
+5. Add global instructions to `~/.claude/CLAUDE.md` (teaches Claude how to use CodeGraph)
+6. Install Claude Code hooks for automatic index syncing
+7. For local installs: initialize and index the current project
 
 ### `codegraph init [path]`
 
@@ -710,27 +708,6 @@ Run `codegraph init` in your project directory first.
 - Run `codegraph sync` to pick up recent changes
 - Check if the file's language is supported
 - Verify the file isn't excluded by config patterns
-
-## 📡 Telemetry
-
-CodeGraph collects anonymous error reports via [Sentry](https://sentry.io) to help diagnose and fix bugs. This is **enabled by default** in production environments (disabled in development/test).
-
-**What is collected:**
-- Error type, message, and stack trace (includes local file paths in the trace)
-- CodeGraph version and process name (CLI or MCP server)
-
-**What is NOT collected:**
-- Source code contents
-- File contents or repository data
-- Personal information or environment variables
-
-**To opt out**, set the environment variable before running CodeGraph:
-
-```bash
-export CODEGRAPH_TELEMETRY=off
-```
-
----
 
 ## 📄 License
 

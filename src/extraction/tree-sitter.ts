@@ -17,7 +17,6 @@ import {
   UnresolvedReference,
 } from '../types';
 import { getParser, detectLanguage, isLanguageSupported } from './grammars';
-import { captureException } from '../sentry';
 
 /**
  * Generate a unique node ID
@@ -961,7 +960,6 @@ export class TreeSitterExtractor {
       this.visitNode(this.tree.rootNode);
       this.nodeStack.pop();
     } catch (error) {
-      captureException(error, { operation: 'tree-sitter-parse', filePath: this.filePath, language: this.language });
       this.errors.push({
         message: `Parse error: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'error',
@@ -2514,7 +2512,6 @@ export class LiquidExtractor {
       // Extract assign statements as variables
       this.extractAssignments(fileNode.id);
     } catch (error) {
-      captureException(error, { operation: 'liquid-extraction', filePath: this.filePath });
       this.errors.push({
         message: `Liquid extraction error: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'error',
@@ -2856,7 +2853,6 @@ export class SvelteExtractor {
         this.processScriptBlock(block, componentNode.id);
       }
     } catch (error) {
-      captureException(error, { operation: 'svelte-extraction', filePath: this.filePath });
       this.errors.push({
         message: `Svelte extraction error: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'error',
@@ -3047,7 +3043,6 @@ export class DfmExtractor {
       const fileNode = this.createFileNode();
       this.parseComponents(fileNode.id);
     } catch (error) {
-      captureException(error, { operation: 'dfm-extraction', filePath: this.filePath });
       this.errors.push({
         message: `DFM extraction error: ${error instanceof Error ? error.message : String(error)}`,
         severity: 'error',

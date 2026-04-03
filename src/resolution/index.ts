@@ -8,7 +8,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Node, UnresolvedReference, Edge } from '../types';
 import { QueryBuilder } from '../db/queries';
-import { captureException } from '../sentry';
 import {
   UnresolvedRef,
   ResolvedRef,
@@ -179,7 +178,6 @@ export class ReferenceResolver {
         try {
           return fs.existsSync(fullPath);
         } catch (error) {
-          captureException(error, { operation: 'resolution-file-exists', filePath });
           logDebug('Error checking file existence', { filePath, error: String(error) });
           return false;
         }
@@ -196,7 +194,6 @@ export class ReferenceResolver {
           this.fileCache.set(filePath, content);
           return content;
         } catch (error) {
-          captureException(error, { operation: 'resolution-read-file', filePath });
           logDebug('Failed to read file for resolution', { filePath, error: String(error) });
           this.fileCache.set(filePath, null);
           return null;
