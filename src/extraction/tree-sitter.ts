@@ -1215,6 +1215,9 @@ export class TreeSitterExtractor {
     });
     if (!funcNode) return;
 
+    // Extract type annotations (parameter types and return type)
+    this.extractTypeAnnotations(node, funcNode.id);
+
     // Push to stack and visit body
     this.nodeStack.push(funcNode.id);
     // Dart: function_body is a next sibling of function_signature, not a child
@@ -1298,6 +1301,9 @@ export class TreeSitterExtractor {
       isStatic,
     });
     if (!methodNode) return;
+
+    // Extract type annotations (parameter types and return type)
+    this.extractTypeAnnotations(node, methodNode.id);
 
     // Push to stack and visit body
     this.nodeStack.push(methodNode.id);
@@ -1425,11 +1431,16 @@ export class TreeSitterExtractor {
             const initValue = valueNode ? getNodeText(valueNode, this.source).slice(0, 100) : undefined;
             const initSignature = initValue ? `= ${initValue}${initValue.length >= 100 ? '...' : ''}` : undefined;
 
-            this.createNode(kind, name, child, {
+            const varNode = this.createNode(kind, name, child, {
               docstring,
               signature: initSignature,
               isExported,
             });
+
+            // Extract type annotation references (e.g., const x: ITextModel = ...)
+            if (varNode) {
+              this.extractVariableTypeAnnotation(child, varNode.id);
+            }
           }
         }
       }
@@ -1527,10 +1538,20 @@ export class TreeSitterExtractor {
     const docstring = getPrecedingDocstring(node, this.source);
     const isExported = this.extractor.isExported?.(node, this.source);
 
-    this.createNode('type_alias', name, node, {
+    const typeAliasNode = this.createNode('type_alias', name, node, {
       docstring,
       isExported,
     });
+
+    // Extract type references from the alias value (e.g., `type X = ITextModel | null`)
+    if (typeAliasNode && this.TYPE_ANNOTATION_LANGUAGES.has(this.language)) {
+      // The value is everything after the `=`, which is typically the last named child
+      // In tree-sitter TS: type_alias_declaration has name + value children
+      const value = getChildByField(node, 'value');
+      if (value) {
+        this.extractTypeRefsFromSubtree(value, typeAliasNode.id);
+      }
+    }
   }
 
   /**
@@ -2099,6 +2120,101 @@ export class TreeSitterExtractor {
             });
           }
         }
+      }
+    }
+  }
+
+  /**
+   * Languages that support type annotations (TypeScript, etc.)
+   */
+  private readonly TYPE_ANNOTATION_LANGUAGES = new Set([
+    'typescript', 'tsx', 'dart', 'kotlin', 'swift', 'rust', 'go', 'java', 'csharp',
+  ]);
+
+  /**
+   * Built-in/primitive type names that shouldn't create references
+   */
+  private readonly BUILTIN_TYPES = new Set([
+    'string', 'number', 'boolean', 'void', 'null', 'undefined', 'never', 'any', 'unknown',
+    'object', 'symbol', 'bigint', 'true', 'false',
+    // Rust
+    'str', 'bool', 'i8', 'i16', 'i32', 'i64', 'i128', 'isize',
+    'u8', 'u16', 'u32', 'u64', 'u128', 'usize', 'f32', 'f64', 'char',
+    // Java/C#
+    'int', 'long', 'short', 'byte', 'float', 'double', 'char',
+    // Go
+    'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64',
+    'float32', 'float64', 'complex64', 'complex128', 'rune', 'error',
+  ]);
+
+  /**
+   * Extract type references from type annotations on a function/method/field node.
+   * Creates 'references' edges for parameter types, return types, and field types.
+   */
+  private extractTypeAnnotations(node: SyntaxNode, nodeId: string): void {
+    if (!this.extractor) return;
+    if (!this.TYPE_ANNOTATION_LANGUAGES.has(this.language)) return;
+
+    // Extract parameter type annotations
+    const params = getChildByField(node, this.extractor.paramsField || 'parameters');
+    if (params) {
+      this.extractTypeRefsFromSubtree(params, nodeId);
+    }
+
+    // Extract return type annotation
+    const returnType = getChildByField(node, this.extractor.returnField || 'return_type');
+    if (returnType) {
+      this.extractTypeRefsFromSubtree(returnType, nodeId);
+    }
+
+    // Extract direct type annotation (for class fields like `model: ITextModel`)
+    const typeAnnotation = node.namedChildren.find(
+      (c: SyntaxNode) => c.type === 'type_annotation'
+    );
+    if (typeAnnotation) {
+      this.extractTypeRefsFromSubtree(typeAnnotation, nodeId);
+    }
+  }
+
+  /**
+   * Extract type references from a variable's type annotation.
+   */
+  private extractVariableTypeAnnotation(node: SyntaxNode, nodeId: string): void {
+    if (!this.TYPE_ANNOTATION_LANGUAGES.has(this.language)) return;
+
+    // Find type_annotation child (covers TS `: Type`, Rust `: Type`, etc.)
+    const typeAnnotation = node.namedChildren.find(
+      (c: SyntaxNode) => c.type === 'type_annotation'
+    );
+    if (typeAnnotation) {
+      this.extractTypeRefsFromSubtree(typeAnnotation, nodeId);
+    }
+  }
+
+  /**
+   * Recursively walk a subtree and extract all type_identifier references.
+   * Handles unions, intersections, generics, arrays, etc.
+   */
+  private extractTypeRefsFromSubtree(node: SyntaxNode, fromNodeId: string): void {
+    if (node.type === 'type_identifier') {
+      const typeName = getNodeText(node, this.source);
+      if (typeName && !this.BUILTIN_TYPES.has(typeName)) {
+        this.unresolvedReferences.push({
+          fromNodeId,
+          referenceName: typeName,
+          referenceKind: 'references',
+          line: node.startPosition.row + 1,
+          column: node.startPosition.column,
+        });
+      }
+      return; // type_identifier is a leaf
+    }
+
+    // Recurse into children (handles union_type, intersection_type, generic_type, etc.)
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child) {
+        this.extractTypeRefsFromSubtree(child, fromNodeId);
       }
     }
   }

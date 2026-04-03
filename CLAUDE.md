@@ -128,7 +128,7 @@ codegraph serve --mcp       # Start MCP server
 
 ## MCP Tools Best Practices
 
-These tools are designed to be used by **Explore agents** for faster codebase exploration:
+Use these tools **directly in the main session** for fast code exploration (replaces the need for Explore agents in most cases):
 
 | Tool | Use For |
 |------|---------|

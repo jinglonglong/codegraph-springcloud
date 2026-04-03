@@ -83,13 +83,30 @@ function extractSymbolsFromQuery(query: string): string[] {
     }
   }
 
-  // Filter out common English words that might match patterns
+  // Extract plain lowercase identifiers (3+ chars, not already matched)
+  // Catches symbol names like "undo", "redo", "history", "render", "parse"
+  const lowercasePattern = /\b([a-z][a-z0-9]{2,})\b/g;
+  while ((match = lowercasePattern.exec(query)) !== null) {
+    if (match[1]) {
+      symbols.add(match[1]);
+    }
+  }
+
+  // Filter out common English words that aren't likely symbol names
   const commonWords = new Set([
     'the', 'and', 'for', 'with', 'from', 'this', 'that', 'have', 'been',
     'will', 'would', 'could', 'should', 'does', 'done', 'make', 'made',
     'use', 'used', 'using', 'work', 'works', 'find', 'found', 'show',
     'call', 'called', 'calling', 'get', 'set', 'add', 'all', 'any',
-    'how', 'what', 'when', 'where', 'which', 'who', 'why'
+    'how', 'what', 'when', 'where', 'which', 'who', 'why',
+    'not', 'but', 'are', 'was', 'were', 'has', 'had', 'its',
+    'can', 'did', 'may', 'also', 'into', 'than', 'then', 'them',
+    'each', 'other', 'some', 'such', 'only', 'same', 'about',
+    'after', 'before', 'between', 'through', 'during', 'without',
+    'again', 'further', 'once', 'here', 'there', 'both', 'just',
+    'more', 'most', 'very', 'being', 'having', 'doing',
+    'system', 'need', 'needs', 'want', 'wants', 'like', 'look',
+    'change', 'changes', 'changed', 'changing',
   ]);
 
   return Array.from(symbols).filter(s => !commonWords.has(s.toLowerCase()));

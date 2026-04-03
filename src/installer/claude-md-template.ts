@@ -16,25 +16,18 @@ CodeGraph builds a semantic knowledge graph of codebases for faster, smarter cod
 
 ### If \`.codegraph/\` exists in the project
 
-**Use codegraph tools for faster exploration.** These tools provide instant lookups via the code graph instead of scanning files:
+**Use codegraph tools directly in the main session.** Codegraph replaces the need for Explore agents in most cases. Instead of spawning an agent (which takes 30+ tool calls and 1+ minutes), use codegraph MCP tools directly for fast, structured answers:
 
 | Tool | Use For |
 |------|---------|
+| \`codegraph_context\` | Get relevant code context for a task (great starting point) |
 | \`codegraph_search\` | Find symbols by name (functions, classes, types) |
-| \`codegraph_context\` | Get relevant code context for a task |
 | \`codegraph_callers\` | Find what calls a function |
 | \`codegraph_callees\` | Find what a function calls |
 | \`codegraph_impact\` | See what's affected by changing a symbol |
 | \`codegraph_node\` | Get details + source code for a symbol |
 
-**When spawning Explore agents in a codegraph-enabled project:**
-
-Tell the Explore agent to use codegraph tools for faster exploration.
-
-**For quick lookups in the main session:**
-- Use \`codegraph_search\` instead of grep for finding symbols
-- Use \`codegraph_callers\`/\`codegraph_callees\` to trace code flow
-- Use \`codegraph_impact\` before making changes to see what's affected
+**Do NOT tell Explore agents to use codegraph tools.** Testing shows Explore agents use codegraph for discovery then still read all the same files — making them slower, not faster. Codegraph's value is in the main session where it replaces the need for exhaustive file reading.
 
 ### If \`.codegraph/\` does NOT exist
 
