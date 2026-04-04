@@ -44,6 +44,7 @@ We tested the same exploration queries across 4 real-world codebases in differen
 | **Excalidraw** | TypeScript | "How does collaborative editing and real-time sync work?" | 3 calls, 29s | 47 calls, 1m 45s | **94% fewer** | **72% faster** |
 | **Claude Code** | Python + Rust | "How does tool execution work end to end?" | 3 calls, 39s | 40 calls, 1m 8s | **93% fewer** | **43% faster** |
 | **Claude Code** | Java | "How does tool execution work end to end?" | 1 call, 19s | 26 calls, 1m 22s | **96% fewer** | **77% faster** |
+| **Alamofire** | Swift | "Trace how a request flows from Session.request() through to the URLSession layer" | 3 calls, 22s | 32 calls, 1m 39s | **91% fewer** | **78% faster** |
 
 <details>
 <summary><strong>Full benchmark details</strong></summary>
@@ -57,6 +58,7 @@ All tests used Claude Opus 4.6 (1M context) with Claude Code v2.1.91. Each test 
 | Excalidraw (TypeScript) | 626 | 9,859 | 3 | 57.1k | 29s | 0 |
 | Claude Code (Python+Rust) | 115 | 3,080 | 3 | 67.1k | 39s | 0 |
 | Claude Code (Java) | — | — | 1 | 40.8k | 19s | 0 |
+| Alamofire (Swift) | 102 | 2,624 | 3 | 57.3k | 22s | 0 |
 
 **Without CodeGraph — the agent uses grep, find, ls, and Read extensively:**
 | Codebase | Tool Uses | Tokens | Time | File Reads |
@@ -65,12 +67,14 @@ All tests used Claude Opus 4.6 (1M context) with Claude Code v2.1.91. Each test 
 | Excalidraw (TypeScript) | 47 | 77.9k | 1m 45s | ~20 |
 | Claude Code (Python+Rust) | 40 | 69.3k | 1m 8s | ~15 |
 | Claude Code (Java) | 26 | 73.3k | 1m 22s | ~15 |
+| Alamofire (Swift) | 32 | 52.4k | 1m 39s | ~10 |
 
 **Key observations:**
 - With CodeGraph, the agent **never fell back to reading files** — it trusted the codegraph_explore results completely
 - Without CodeGraph, agents spent most of their time on discovery (find, ls, grep) before they could even start reading relevant code
 - The Java codebase needed only **1 codegraph_explore call** to answer the entire question
 - Cross-language queries (Python+Rust) worked seamlessly — CodeGraph's graph traversal found connections across language boundaries
+- The Swift benchmark (Alamofire) traced a **9-step call chain** from `Session.request()` to `URLSession.dataTask()` — CodeGraph's graph traversal at depth 3 captured the full chain in one explore call
 
 </details>
 

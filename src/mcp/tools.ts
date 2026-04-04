@@ -622,7 +622,7 @@ export class ToolHandler {
     // Step 1: Find relevant context with generous parameters
     const subgraph = await cg.findRelevantContext(query, {
       searchLimit: 8,
-      traversalDepth: 2,
+      traversalDepth: 3,
       maxNodes: 80,
       minScore: 0.2,
     });
@@ -1113,15 +1113,38 @@ export class ToolHandler {
    * Find a symbol by name, handling disambiguation when multiple matches exist.
    * Returns the best match and a note about alternatives if any.
    */
+  /**
+   * Check if a node matches a symbol query, supporting both simple names and
+   * qualified "Parent.child" notation (e.g., "Session.request" matches a method
+   * named "request" inside a class named "Session").
+   */
+  private matchesSymbol(node: Node, symbol: string): boolean {
+    // Simple name match
+    if (node.name === symbol) return true;
+    // File basename match (e.g., "product-card" matches "product-card.liquid")
+    if (node.kind === 'file' && node.name.replace(/\.[^.]+$/, '') === symbol) return true;
+
+    // Qualified name match: "Parent.child" → look for "::Parent::child" in qualified_name
+    if (symbol.includes('.')) {
+      const parts = symbol.split('.');
+      const qualifiedSuffix = parts.join('::');
+      if (node.qualifiedName.includes(qualifiedSuffix)) return true;
+    }
+
+    return false;
+  }
+
   private findSymbol(cg: CodeGraph, symbol: string): { node: Node; note: string } | null {
-    const results = cg.searchNodes(symbol, { limit: 10 });
+    // Use higher limit for qualified lookups (e.g., "Session.request") since the
+    // target may rank lower in FTS when there are many partial matches
+    const limit = symbol.includes('.') ? 50 : 10;
+    const results = cg.searchNodes(symbol, { limit });
 
     if (results.length === 0 || !results[0]) {
       return null;
     }
 
-    // If only one result, or first is an exact name match, use it directly
-    const exactMatches = results.filter(r => r.node.name === symbol);
+    const exactMatches = results.filter(r => this.matchesSymbol(r.node, symbol));
 
     if (exactMatches.length === 1) {
       return { node: exactMatches[0]!.node, note: '' };
@@ -1152,12 +1175,7 @@ export class ToolHandler {
       return { nodes: [], note: '' };
     }
 
-    // Match by exact name, OR by file basename without extension
-    // (e.g., "product-card" matches file node named "product-card.liquid")
-    const exactMatches = results.filter(r =>
-      r.node.name === symbol ||
-      (r.node.kind === 'file' && r.node.name.replace(/\.[^.]+$/, '') === symbol)
-    );
+    const exactMatches = results.filter(r => this.matchesSymbol(r.node, symbol));
 
     if (exactMatches.length <= 1) {
       const node = exactMatches[0]?.node ?? results[0]!.node;
