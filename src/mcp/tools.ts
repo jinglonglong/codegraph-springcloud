@@ -601,8 +601,8 @@ export class ToolHandler {
     return this.textResult(this.truncateOutput(formatted));
   }
 
-  /** Maximum output for explore tool (much larger than standard tools) */
-  private static readonly EXPLORE_MAX_OUTPUT = 50000;
+  /** Maximum output for explore tool — sized to stay under MCP client token limits (~10k tokens) */
+  private static readonly EXPLORE_MAX_OUTPUT = 35000;
 
   /**
    * Handle codegraph_explore — deep exploration in a single call
