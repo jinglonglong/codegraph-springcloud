@@ -115,6 +115,9 @@ export interface IndexOptions {
 
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+
+  /** Enable verbose logging (worker lifecycle, memory, timeouts) */
+  verbose?: boolean;
 }
 
 /**
@@ -383,7 +386,7 @@ export class CodeGraph {
         return { success: false, filesIndexed: 0, filesSkipped: 0, filesErrored: 0, nodesCreated: 0, edgesCreated: 0, errors: [{ message: 'Could not acquire file lock - another process may be indexing', severity: 'error' as const }], durationMs: 0 };
       }
       try {
-        const result = await this.orchestrator.indexAll(options.onProgress, options.signal);
+        const result = await this.orchestrator.indexAll(options.onProgress, options.signal, options.verbose);
 
         // Resolve references to create call/import/extends edges
         if (result.success && result.filesIndexed > 0) {

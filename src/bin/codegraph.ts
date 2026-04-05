@@ -177,6 +177,40 @@ function formatDuration(ms: number): string {
 // Imported at top of file from '../ui/shimmer-progress'
 
 /**
+ * Create a plain-text progress callback for --verbose mode.
+ * No animations, no ANSI tricks — just timestamped lines to stdout.
+ */
+function createVerboseProgress(): (progress: { phase: string; current: number; total: number; currentFile?: string }) => void {
+  let lastPhase = '';
+  let lastPct = -1;
+  const startTime = Date.now();
+
+  return (progress) => {
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    if (progress.phase !== lastPhase) {
+      lastPhase = progress.phase;
+      lastPct = -1;
+      console.log(`[${elapsed}s] Phase: ${progress.phase}`);
+    }
+
+    if (progress.total > 0) {
+      const pct = Math.floor((progress.current / progress.total) * 100);
+      // Log every 5% to keep output manageable
+      if (pct >= lastPct + 5 || progress.current === progress.total) {
+        lastPct = pct;
+        console.log(`[${elapsed}s]   ${progress.current}/${progress.total} (${pct}%)${progress.currentFile ? ` — ${progress.currentFile}` : ''}`);
+      }
+    } else if (progress.current > 0) {
+      // Scanning phase (no total yet) — log periodically
+      if (progress.current % 1000 === 0 || progress.current === 1) {
+        console.log(`[${elapsed}s]   ${formatNumber(progress.current)} files found`);
+      }
+    }
+  };
+}
+
+/**
  * Print success message
  */
 function success(message: string): void {
@@ -330,7 +364,8 @@ program
   .command('init [path]')
   .description('Initialize CodeGraph in a project directory')
   .option('-i, --index', 'Run initial indexing after initialization')
-  .action(async (pathArg: string | undefined, options: { index?: boolean }) => {
+  .option('-v, --verbose', 'Show detailed worker lifecycle and memory info')
+  .action(async (pathArg: string | undefined, options: { index?: boolean; verbose?: boolean }) => {
     const projectPath = path.resolve(pathArg || process.cwd());
     const clack = await importESM('@clack/prompts');
 
@@ -349,14 +384,22 @@ program
       clack.log.success(`Initialized in ${projectPath}`);
 
       if (options.index) {
-        process.stdout.write(`${colors.dim}│${colors.reset}\n`);
-        const progress = createShimmerProgress();
+        let result: IndexResult;
 
-        const result = await cg.indexAll({
-          onProgress: progress.onProgress,
-        });
+        if (options.verbose) {
+          result = await cg.indexAll({
+            onProgress: createVerboseProgress(),
+            verbose: true,
+          });
+        } else {
+          process.stdout.write(`${colors.dim}│${colors.reset}\n`);
+          const progress = createShimmerProgress();
+          result = await cg.indexAll({
+            onProgress: progress.onProgress,
+          });
+          await progress.stop();
+        }
 
-        await progress.stop();
         printIndexResult(clack, result, projectPath);
       } else {
         clack.log.info('Run "codegraph index" to index the project');
@@ -423,7 +466,8 @@ program
   .description('Index all files in the project')
   .option('-f, --force', 'Force full re-index even if already indexed')
   .option('-q, --quiet', 'Suppress progress output')
-  .action(async (pathArg: string | undefined, options: { force?: boolean; quiet?: boolean }) => {
+  .option('-v, --verbose', 'Show detailed worker lifecycle and memory info')
+  .action(async (pathArg: string | undefined, options: { force?: boolean; quiet?: boolean; verbose?: boolean }) => {
     const projectPath = resolveProjectPath(pathArg);
 
     try {
@@ -453,14 +497,22 @@ program
         clack.log.info('Cleared existing index');
       }
 
-      process.stdout.write(`${colors.dim}│${colors.reset}\n`);
-      const progress = createShimmerProgress();
+      let result: IndexResult;
 
-      const result = await cg.indexAll({
-        onProgress: progress.onProgress,
-      });
+      if (options.verbose) {
+        result = await cg.indexAll({
+          onProgress: createVerboseProgress(),
+          verbose: true,
+        });
+      } else {
+        process.stdout.write(`${colors.dim}│${colors.reset}\n`);
+        const progress = createShimmerProgress();
+        result = await cg.indexAll({
+          onProgress: progress.onProgress,
+        });
+        await progress.stop();
+      }
 
-      await progress.stop();
       printIndexResult(clack, result, projectPath);
 
       if (!result.success) {
