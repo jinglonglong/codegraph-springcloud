@@ -720,8 +720,8 @@ export class ExtractionOrchestrator {
     }
 
     // Retry pass: files that failed due to WASM memory corruption may succeed
-    // on a fresh worker with a clean heap. Collect retryable failures, recycle
-    // the worker, and try each one individually.
+    // on a fresh worker with a clean heap. Recycle before each attempt so
+    // every file gets the absolute cleanest WASM state possible.
     const retryableErrors = errors.filter(
       (e) => e.code === 'parse_error' && e.filePath &&
         (e.message.includes('Worker exited') || e.message.includes('memory access out of bounds'))
@@ -730,12 +730,14 @@ export class ExtractionOrchestrator {
     if (retryableErrors.length > 0 && WorkerClass) {
       log(`Retrying ${retryableErrors.length} files that failed due to WASM memory errors...`);
 
-      // Force a fresh worker
-      recycleWorker();
+      const stillFailing: typeof retryableErrors = [];
 
       for (const errEntry of retryableErrors) {
         const filePath = errEntry.filePath!;
         if (signal?.aborted) break;
+
+        // Fresh worker for every retry — maximum WASM headroom
+        recycleWorker();
 
         let content: string;
         try {
@@ -743,23 +745,22 @@ export class ExtractionOrchestrator {
           if (!fullPath) continue;
           content = await fsp.readFile(fullPath, 'utf-8');
         } catch {
-          continue; // Skip files we can't read
+          continue;
         }
 
         let result: ExtractionResult;
         try {
           result = await requestParse(filePath, content);
         } catch {
-          continue; // Still failing — leave as errored
+          stillFailing.push(errEntry);
+          continue;
         }
 
         if (result.nodes.length > 0 || result.errors.length === 0) {
-          // Success on retry — store result and fix counts
           const language = detectLanguage(filePath);
           const stats = await fsp.stat(path.join(this.rootDir, filePath));
           this.storeExtractionResult(filePath, content, language, stats, result);
 
-          // Remove the original error and update counts
           const idx = errors.indexOf(errEntry);
           if (idx >= 0) errors.splice(idx, 1);
           filesErrored--;
@@ -767,6 +768,58 @@ export class ExtractionOrchestrator {
           totalNodes += result.nodes.length;
           totalEdges += result.edges.length;
           log(`Retry OK: ${filePath} (${result.nodes.length} nodes)`);
+        }
+      }
+
+      // Last resort: for files that still crash on a clean worker, strip
+      // comment-only lines to reduce WASM memory pressure. Many compiler
+      // test files are 90%+ comments (CHECK directives) that don't contribute
+      // code nodes but consume parser memory.
+      if (stillFailing.length > 0) {
+        log(`${stillFailing.length} files still failing — retrying with comments stripped...`);
+
+        for (const errEntry of stillFailing) {
+          const filePath = errEntry.filePath!;
+          if (signal?.aborted) break;
+
+          recycleWorker();
+
+          let fullContent: string;
+          try {
+            const fullPath = validatePathWithinRoot(this.rootDir, filePath);
+            if (!fullPath) continue;
+            fullContent = await fsp.readFile(fullPath, 'utf-8');
+          } catch {
+            continue;
+          }
+
+          // Strip lines that are entirely comments (preserving line numbers
+          // by replacing with empty lines so node positions stay correct)
+          const stripped = fullContent
+            .split('\n')
+            .map(line => /^\s*\/\//.test(line) ? '' : line)
+            .join('\n');
+
+          let result: ExtractionResult;
+          try {
+            result = await requestParse(filePath, stripped);
+          } catch {
+            continue;
+          }
+
+          if (result.nodes.length > 0 || result.errors.length === 0) {
+            const language = detectLanguage(filePath);
+            const stats = await fsp.stat(path.join(this.rootDir, filePath));
+            this.storeExtractionResult(filePath, fullContent, language, stats, result);
+
+            const idx = errors.indexOf(errEntry);
+            if (idx >= 0) errors.splice(idx, 1);
+            filesErrored--;
+            filesIndexed++;
+            totalNodes += result.nodes.length;
+            totalEdges += result.edges.length;
+            log(`Retry (stripped) OK: ${filePath} (${result.nodes.length} nodes)`);
+          }
         }
       }
     }
