@@ -1,5 +1,15 @@
 import { parentPort, workerData } from 'worker_threads';
+import { writeSync } from 'fs';
 import type { ShimmerWorkerMessage } from './types';
+
+// Write directly to fd 1 (stdout) instead of writeStdout().
+// In Node.js worker threads, process.stdout is proxied through the main
+// thread's event loop — so if the main thread is blocked (e.g. SQLite),
+// stdout writes from the worker queue up and the animation freezes.
+// fs.writeSync(1, ...) is a direct kernel syscall that bypasses this.
+function writeStdout(s: string): void {
+  writeSync(1, s);
+}
 
 const SPINNER_GLYPHS = ['·', '✢', '✳', '✶', '✻', '✽'];
 const ANIM_INTERVAL = 150;
@@ -74,16 +84,16 @@ function render(): void {
     line = `${DM}│${RST}  ${color}${glyph}${RST} ${currentMessage}...`;
   }
 
-  process.stdout.write(`\r\x1b[K${line}`);
+  writeStdout(`\r\x1b[K${line}`);
 }
 
 function finishPhase(): void {
   if (!currentMessage) return;
-  process.stdout.write(`\r\x1b[K`);
+  writeStdout(`\r\x1b[K`);
   let detail = '';
   if (currentPercent >= 0) detail = ' — done';
   else if (currentCount > 0) detail = ` — ${formatNumber(currentCount)} found`;
-  process.stdout.write(`${DM}│${RST}  ${GRN}◆${RST} ${currentMessage}${detail}\n`);
+  writeStdout(`${DM}│${RST}  ${GRN}◆${RST} ${currentMessage}${detail}\n`);
   currentMessage = '';
   currentPercent = -1;
   currentCount = 0;

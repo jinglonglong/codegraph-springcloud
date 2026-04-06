@@ -326,10 +326,10 @@ export class ReferenceResolver {
    * Processes unresolved references in chunks, persisting edges and cleaning
    * up resolved refs after each batch to avoid accumulating large arrays.
    */
-  resolveAndPersistBatched(
+  async resolveAndPersistBatched(
     onProgress?: (current: number, total: number) => void,
     batchSize: number = 5000
-  ): ResolutionResult {
+  ): Promise<ResolutionResult> {
     this.warmCaches();
 
     const total = this.queries.getUnresolvedReferencesCount();
@@ -387,6 +387,9 @@ export class ReferenceResolver {
 
       processed += batch.length;
       onProgress?.(processed, total);
+
+      // Yield so progress UI can render between batches
+      await new Promise(resolve => setImmediate(resolve));
 
       // If nothing was resolved or removed in this batch, we'd loop forever
       // on the same rows. Break to avoid infinite loop.

@@ -390,6 +390,16 @@ export class CodeGraph {
 
         // Resolve references to create call/import/extends edges
         if (result.success && result.filesIndexed > 0) {
+          // Signal transition so progress bar doesn't hang at "Parsing 100%"
+          options.onProgress?.({
+            phase: 'finalizing',
+            current: 0,
+            total: 0,
+          });
+
+          // Yield so shimmer worker can flush the phase transition to stdout
+          await new Promise(resolve => setImmediate(resolve));
+
           // Get count without loading all refs into memory
           const unresolvedCount = this.queries.getUnresolvedReferencesCount();
 
@@ -399,7 +409,7 @@ export class CodeGraph {
             total: unresolvedCount,
           });
 
-          this.resolveReferencesBatched((current, total) => {
+          await this.resolveReferencesBatched((current, total) => {
             options.onProgress?.({
               phase: 'resolving',
               current,
@@ -479,7 +489,7 @@ export class CodeGraph {
               total: unresolvedCount,
             });
 
-            this.resolveReferencesBatched((current, total) => {
+            await this.resolveReferencesBatched((current, total) => {
               options.onProgress?.({
                 phase: 'resolving',
                 current,
@@ -540,7 +550,7 @@ export class CodeGraph {
    * Resolve references in batches to keep memory bounded on large codebases.
    * Processes chunks of unresolved refs, persisting results after each batch.
    */
-  resolveReferencesBatched(onProgress?: (current: number, total: number) => void): ResolutionResult {
+  async resolveReferencesBatched(onProgress?: (current: number, total: number) => void): Promise<ResolutionResult> {
     return this.resolver.resolveAndPersistBatched(onProgress);
   }
 

@@ -5,6 +5,7 @@ const PHASE_NAMES: Record<string, string> = {
   scanning: 'Scanning files',
   parsing: 'Parsing code',
   storing: 'Storing data',
+  finalizing: 'Finalizing',
   resolving: 'Resolving refs',
 };
 

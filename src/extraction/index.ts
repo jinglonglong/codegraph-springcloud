@@ -51,7 +51,7 @@ const WORKER_RECYCLE_INTERVAL = 250;
  * Progress callback for indexing operations
  */
 export interface IndexProgress {
-  phase: 'scanning' | 'parsing' | 'storing' | 'resolving';
+  phase: 'scanning' | 'parsing' | 'storing' | 'finalizing' | 'resolving';
   current: number;
   total: number;
   currentFile?: string;
@@ -460,6 +460,16 @@ export class ExtractionOrchestrator {
     const total = files.length;
     let processed = 0;
 
+    // Emit parsing phase immediately so the progress bar appears during worker setup.
+    // The yield lets the shimmer worker flush the phase transition to stdout before
+    // the main thread starts synchronous grammar detection work.
+    onProgress?.({
+      phase: 'parsing',
+      current: 0,
+      total,
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
     // Detect needed languages and load grammars in the parse worker
     const neededLanguages = [...new Set(files.map((f) => detectLanguage(f)))];
 
@@ -718,6 +728,18 @@ export class ExtractionOrchestrator {
         }
       }
     }
+
+    // Report 100% so the progress bar doesn't hang at 99%
+    onProgress?.({
+      phase: 'parsing',
+      current: total,
+      total,
+    });
+
+    // Yield so the shimmer worker's buffered stdout writes can flush.
+    // Worker thread stdout is proxied through the main thread's event loop,
+    // so synchronous work here blocks the animation from rendering.
+    await new Promise(resolve => setImmediate(resolve));
 
     // Retry pass: files that failed due to WASM memory corruption may succeed
     // on a fresh worker with a clean heap. Recycle before each attempt so
