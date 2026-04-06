@@ -291,10 +291,36 @@ export class ContextBuilder {
     let exactMatches: SearchResult[] = [];
     if (symbolsFromQuery.length > 0) {
       try {
+        // Get more results so we can apply co-location boosting before trimming
         exactMatches = this.queries.findNodesByExactName(symbolsFromQuery, {
-          limit: Math.ceil(opts.searchLimit * 2), // Get more since we'll merge
+          limit: Math.ceil(opts.searchLimit * 5),
           kinds: opts.nodeKinds && opts.nodeKinds.length > 0 ? opts.nodeKinds : undefined,
         });
+
+        // Co-location boost: when multiple extracted symbols appear in the same file,
+        // those results are much more likely to be what the user is looking for.
+        // E.g., "scrapeLoop" + "run" both in scrape/scrape.go → boost both.
+        if (exactMatches.length > 1) {
+          // Build a map of files → how many distinct symbol names matched in that file
+          const fileSymbolCounts = new Map<string, Set<string>>();
+          for (const r of exactMatches) {
+            const names = fileSymbolCounts.get(r.node.filePath) || new Set();
+            names.add(r.node.name.toLowerCase());
+            fileSymbolCounts.set(r.node.filePath, names);
+          }
+          // Boost results in files where multiple query symbols co-occur
+          exactMatches = exactMatches.map(r => {
+            const symbolCount = fileSymbolCounts.get(r.node.filePath)?.size || 1;
+            return {
+              ...r,
+              score: symbolCount > 1 ? r.score + (symbolCount - 1) * 20 : r.score,
+            };
+          });
+          exactMatches.sort((a, b) => b.score - a.score);
+        }
+
+        // Trim back to reasonable size
+        exactMatches = exactMatches.slice(0, Math.ceil(opts.searchLimit * 2));
         logDebug('Exact symbol matches', { count: exactMatches.length });
       } catch (error) {
         logDebug('Exact symbol lookup failed', { error: String(error) });

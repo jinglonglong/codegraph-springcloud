@@ -630,39 +630,80 @@ export class QueryBuilder {
 
     const { kinds, languages, limit = 50 } = options;
 
-    // Build query with exact matches (case-insensitive)
-    let sql = `
-      SELECT nodes.*,
-        CASE
-          WHEN name COLLATE NOCASE IN (${names.map(() => '?').join(',')}) THEN 1.0
-          ELSE 0.9
-        END as score
-      FROM nodes
-      WHERE name COLLATE NOCASE IN (${names.map(() => '?').join(',')})
-    `;
+    // Two-pass approach to handle common names (e.g., "run" has 40+ matches):
+    // Pass 1: Find which files contain distinctive (rare) symbols from the query.
+    // Pass 2: Query each name, boosting results that co-locate with distinctive symbols.
 
-    // Duplicate names for both SELECT and WHERE clauses
-    const params: (string | number)[] = [...names, ...names];
-
-    if (kinds && kinds.length > 0) {
-      sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`;
-      params.push(...kinds);
+    // Pass 1: Find files containing each queried name, identify distinctive names
+    const nameToFiles = new Map<string, Set<string>>();
+    for (const name of names) {
+      let sql = 'SELECT DISTINCT file_path FROM nodes WHERE name COLLATE NOCASE = ?';
+      const params: (string | number)[] = [name];
+      if (kinds && kinds.length > 0) {
+        sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`;
+        params.push(...kinds);
+      }
+      sql += ' LIMIT 100';
+      const rows = this.db.prepare(sql).all(...params) as { file_path: string }[];
+      nameToFiles.set(name.toLowerCase(), new Set(rows.map(r => r.file_path)));
     }
 
-    if (languages && languages.length > 0) {
-      sql += ` AND language IN (${languages.map(() => '?').join(',')})`;
-      params.push(...languages);
+    // Distinctive names are those with fewer than 10 file matches (e.g., "scrapeLoop" = 1 file)
+    const distinctiveFiles = new Set<string>();
+    for (const [, files] of nameToFiles) {
+      if (files.size > 0 && files.size < 10) {
+        for (const f of files) distinctiveFiles.add(f);
+      }
     }
 
-    sql += ' ORDER BY score DESC, length(name) ASC LIMIT ?';
-    params.push(limit);
+    // Pass 2: Query each name with per-name limit, scoring by co-location
+    const perNameLimit = Math.max(8, Math.ceil(limit / names.length));
+    const allResults: SearchResult[] = [];
+    const seenIds = new Set<string>();
 
-    const rows = this.db.prepare(sql).all(...params) as (NodeRow & { score: number })[];
+    for (const name of names) {
+      let sql = `
+        SELECT nodes.*, 1.0 as score
+        FROM nodes
+        WHERE name COLLATE NOCASE = ?
+      `;
+      const params: (string | number)[] = [name];
 
-    return rows.map((row) => ({
-      node: rowToNode(row),
-      score: row.score,
-    }));
+      if (kinds && kinds.length > 0) {
+        sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`;
+        params.push(...kinds);
+      }
+
+      if (languages && languages.length > 0) {
+        sql += ` AND language IN (${languages.map(() => '?').join(',')})`;
+        params.push(...languages);
+      }
+
+      // Fetch enough to find co-located results among common names
+      sql += ' LIMIT ?';
+      params.push(Math.max(perNameLimit * 3, 50));
+
+      const rows = this.db.prepare(sql).all(...params) as (NodeRow & { score: number })[];
+      const nameResults: SearchResult[] = [];
+      for (const row of rows) {
+        const node = rowToNode(row);
+        if (seenIds.has(node.id)) continue;
+        // Boost results in files that also contain distinctive symbols
+        const coLocationBoost = distinctiveFiles.has(node.filePath) ? 20 : 0;
+        nameResults.push({ node, score: row.score + coLocationBoost });
+      }
+
+      // Sort by score (co-located first), take per-name limit
+      nameResults.sort((a, b) => b.score - a.score);
+      for (const r of nameResults.slice(0, perNameLimit)) {
+        seenIds.add(r.node.id);
+        allResults.push(r);
+      }
+    }
+
+    // Sort all results by score so co-located results bubble up
+    allResults.sort((a, b) => b.score - a.score);
+    return allResults.slice(0, limit);
   }
 
   // ===========================================================================

@@ -27,4 +27,16 @@ export const goExtractor: LanguageExtractor = {
     }
     return sig;
   },
+  getReceiverType: (node, source) => {
+    // Go method_declaration has a "receiver" field: func (sl *scrapeLoop) run(...)
+    // The receiver is a parameter_list containing a parameter_declaration
+    // with a type that may be a pointer_type (*scrapeLoop) or plain type (scrapeLoop)
+    const receiver = getChildByField(node, 'receiver');
+    if (!receiver) return undefined;
+    // Find the type identifier inside the receiver
+    const text = getNodeText(receiver, source);
+    // Extract type name from patterns like "(sl *Type)", "(sl Type)", "(*Type)", "(Type)"
+    const match = text.match(/\*?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/);
+    return match?.[1];
+  },
 };

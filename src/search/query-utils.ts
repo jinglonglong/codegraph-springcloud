@@ -25,16 +25,38 @@ export const STOP_WORDS = new Set([
   'over', 'only', 'new', 'out', 'its', 'so', 'up', 'as', 'if',
   // Code-specific noise
   'code', 'file', 'files', 'function', 'method', 'class', 'type',
-  'build', 'run', 'test', 'fix', 'bug', 'call', 'called', 'set', 'add',
+  'build', 'fix', 'bug', 'called', 'set', 'add',
 ]);
 
 /**
  * Extract meaningful search terms from a natural language query.
  * Splits camelCase, PascalCase, snake_case, SCREAMING_SNAKE, and dot.notation
  * into individual tokens before filtering.
+ *
+ * Preserves original compound identifiers (e.g., "scrapeLoop") alongside
+ * their split parts so that FTS can match both the full symbol name and
+ * individual words within it.
  */
 export function extractSearchTerms(query: string): string[] {
   const tokens = new Set<string>();
+
+  // First, extract and preserve compound identifiers before splitting
+  // CamelCase: scrapeLoop, UserService, getCallGraph
+  const compoundPattern = /\b([a-zA-Z][a-zA-Z0-9]*(?:[A-Z][a-z]+)+|[A-Z][a-z]+(?:[A-Z][a-z]*)+)\b/g;
+  let match;
+  while ((match = compoundPattern.exec(query)) !== null) {
+    if (match[1] && match[1].length >= 3) {
+      tokens.add(match[1].toLowerCase()); // preserve full compound: "scrapeloop"
+    }
+  }
+
+  // snake_case: scrape_loop, user_service
+  const snakePattern = /\b([a-zA-Z][a-zA-Z0-9]*(?:_[a-zA-Z0-9]+)+)\b/g;
+  while ((match = snakePattern.exec(query)) !== null) {
+    if (match[1] && match[1].length >= 3) {
+      tokens.add(match[1].toLowerCase());
+    }
+  }
 
   // Split camelCase / PascalCase: "getUserName" → "get User Name"
   const camelSplit = query

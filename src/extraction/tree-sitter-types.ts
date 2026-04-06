@@ -163,4 +163,11 @@ export interface LanguageExtractor {
    * Returns info about each declared variable, allowing the core to create nodes.
    */
   extractVariables?: (node: SyntaxNode, source: string) => VariableInfo[];
+
+  /**
+   * Extract receiver/owner type name from a method declaration.
+   * Used by Go to get the struct receiver (e.g., "scrapeLoop" from "func (sl *scrapeLoop) run()").
+   * When present, the receiver type is included in the qualified name for better searchability.
+   */
+  getReceiverType?: (node: SyntaxNode, source: string) => string | undefined;
 }

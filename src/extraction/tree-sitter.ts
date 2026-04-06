@@ -505,13 +505,21 @@ export class TreeSitterExtractor {
     const isAsync = this.extractor.isAsync?.(node);
     const isStatic = this.extractor.isStatic?.(node);
 
-    const methodNode = this.createNode('method', name, node, {
+    // For languages with receiver types (Go), include receiver in qualified name
+    // so FTS can match "scrapeLoop.run" → qualified_name "...::scrapeLoop::run"
+    const receiverType = this.extractor.getReceiverType?.(node, this.source);
+    const extraProps: Partial<Node> = {
       docstring,
       signature,
       visibility,
       isAsync,
       isStatic,
-    });
+    };
+    if (receiverType) {
+      extraProps.qualifiedName = `${this.filePath}::${receiverType}::${name}`;
+    }
+
+    const methodNode = this.createNode('method', name, node, extraProps);
     if (!methodNode) return;
 
     // Extract type annotations (parameter types and return type)
