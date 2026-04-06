@@ -174,6 +174,7 @@ if (receiverType) {
 ## Languages Completed
 
 - [x] **Go** — `getReceiverType` extracts receiver from `func (sl *Type) method()`
+- [x] **Swift** — NOT needed. Tree-sitter parses `extension Type { }` as `class_declaration`, so methods already get owner type in `qualified_name` (e.g., `SimplifyApply.swift::SimplifyApply.swift::ApplyInst::simplify`)
 
 ## Languages To Do
 
@@ -181,7 +182,6 @@ Check these — only add `getReceiverType` if methods are top-level (not nested 
 
 - [ ] Rust — methods in `impl Type { }` blocks
 - [ ] C++ — out-of-class method definitions `Type::method()`
-- [ ] Swift — methods in `extension Type { }` blocks
 - [ ] Kotlin — extension functions `fun Type.method()`
 
 Verify these DON'T need it (methods nested in class body → qualified name should already be correct):
