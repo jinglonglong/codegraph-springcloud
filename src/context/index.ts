@@ -25,7 +25,7 @@ import { VectorManager } from '../vectors';
 import { formatContextAsMarkdown, formatContextAsJson } from './formatter';
 import { logDebug } from '../errors';
 import { validatePathWithinRoot } from '../utils';
-import { isTestFile, extractSearchTerms } from '../search/query-utils';
+import { isTestFile, extractSearchTerms, scorePathRelevance } from '../search/query-utils';
 
 /**
  * Extract likely symbol names from a natural language query
@@ -490,6 +490,79 @@ export class ContextBuilder {
       searchResults.sort((a, b) => b.score - a.score);
     }
 
+    // Step 5b: CamelCase-boundary matching via LIKE query.
+    // FTS can't find "Search" inside "TransportSearchAction" (one FTS token).
+    // LIKE reliably finds these substring matches. Results are appended with
+    // guaranteed slots so they don't compete with higher-scoring prefix matches.
+    if (symbolsFromQuery.length > 0) {
+      const camelDefinitionKinds: NodeKind[] = ['class', 'interface', 'struct', 'trait',
+        'protocol', 'enum', 'type_alias'];
+      const camelSearchedTerms = new Set<string>();
+      const searchIdSet = new Set(searchResults.map(r => r.node.id));
+      // Track per-node term hits for multi-term boosting
+      const camelNodeTerms = new Map<string, { result: SearchResult; termCount: number }>();
+      const maxCamelPerTerm = Math.ceil(opts.searchLimit / 2);
+
+      for (const sym of symbolsFromQuery) {
+        const titleCased = sym.charAt(0).toUpperCase() + sym.slice(1).toLowerCase();
+        if (titleCased.length < 3) continue;
+        const termKey = titleCased.toLowerCase();
+        if (camelSearchedTerms.has(termKey)) continue;
+        camelSearchedTerms.add(termKey);
+
+        // Fetch a large batch — popular terms like "Search" in Elasticsearch
+        // have hundreds of substring matches. The LIKE scan cost is the same
+        // regardless of LIMIT (SQLite scans all matches to sort), so we fetch
+        // generously and let path-relevance scoring pick the best ones.
+        const likeResults = this.queries.findNodesByNameSubstring(titleCased, {
+          limit: 200,
+          kinds: camelDefinitionKinds,
+          excludePrefix: true,
+        });
+
+        // Filter to CamelCase boundaries, score by path relevance, and take top N
+        const termCandidates: SearchResult[] = [];
+        for (const r of likeResults) {
+          const name = r.node.name;
+          const idx = name.indexOf(titleCased);
+          if (idx <= 0) continue;
+          if (!/[a-z]/.test(name.charAt(idx - 1))) continue;
+          if (searchIdSet.has(r.node.id)) continue;
+          if (isTestFile(r.node.filePath) && !isTestQuery) continue;
+
+          const pathScore = scorePathRelevance(r.node.filePath, query);
+          const brevityBonus = Math.max(0, 6 - (name.length - titleCased.length) / 4);
+          termCandidates.push({ node: r.node, score: 8 + brevityBonus + pathScore });
+        }
+        termCandidates.sort((a, b) => b.score - a.score);
+
+        for (const r of termCandidates.slice(0, maxCamelPerTerm)) {
+          const existing = camelNodeTerms.get(r.node.id);
+          if (existing) {
+            existing.termCount++;
+          } else {
+            camelNodeTerms.set(r.node.id, {
+              result: r,
+              termCount: 1,
+            });
+          }
+        }
+      }
+
+      // Append CamelCase matches with multi-term boost (guaranteed slots)
+      const camelResults: SearchResult[] = [];
+      for (const [, info] of camelNodeTerms) {
+        info.result.score += (info.termCount - 1) * 15;
+        camelResults.push(info.result);
+      }
+      camelResults.sort((a, b) => b.score - a.score);
+      const maxCamelTotal = Math.ceil(opts.searchLimit / 2);
+      for (const r of camelResults.slice(0, maxCamelTotal)) {
+        searchResults.push(r);
+        searchIdSet.add(r.node.id);
+      }
+    }
+
     // Filter by minimum score
     let filteredResults = searchResults.filter((r) => r.score >= opts.minScore);
 
@@ -502,6 +575,63 @@ export class ContextBuilder {
     for (const result of filteredResults) {
       nodes.set(result.node.id, result.node);
       roots.push(result.node.id);
+    }
+
+    // Expand type hierarchy for class/interface entry points.
+    // BFS often exhausts its per-entry-point budget on contained methods
+    // before reaching extends/implements neighbors. This dedicated step
+    // ensures subclasses and superclasses always appear in results.
+    // Budget: up to maxNodes/4 hierarchy nodes to avoid flooding.
+    const typeHierarchyKinds = new Set<string>(['class', 'interface', 'struct', 'trait', 'protocol']);
+    const maxHierarchyNodes = Math.ceil(opts.maxNodes / 4);
+    let hierarchyNodesAdded = 0;
+    for (const result of filteredResults) {
+      if (hierarchyNodesAdded >= maxHierarchyNodes) break;
+      if (typeHierarchyKinds.has(result.node.kind)) {
+        const hierarchy = this.traverser.getTypeHierarchy(result.node.id);
+        for (const [id, node] of hierarchy.nodes) {
+          if (!nodes.has(id)) {
+            nodes.set(id, node);
+            hierarchyNodesAdded++;
+          }
+        }
+        for (const edge of hierarchy.edges) {
+          const exists = edges.some(
+            (e) => e.source === edge.source && e.target === edge.target && e.kind === edge.kind
+          );
+          if (!exists) {
+            edges.push(edge);
+          }
+        }
+      }
+    }
+
+    // Pass 2: expand hierarchy of newly-discovered parent types to find siblings.
+    // E.g., InternalEngine → Engine (parent, from pass 1) → ReadOnlyEngine (sibling).
+    if (hierarchyNodesAdded > 0) {
+      const pass2Candidates = [...nodes.values()].filter(
+        n => typeHierarchyKinds.has(n.kind) && !roots.includes(n.id)
+      );
+      for (const candidate of pass2Candidates) {
+        if (hierarchyNodesAdded >= maxHierarchyNodes) break;
+        const siblingHierarchy = this.traverser.getTypeHierarchy(candidate.id);
+        for (const [id, node] of siblingHierarchy.nodes) {
+          if (!nodes.has(id) && hierarchyNodesAdded < maxHierarchyNodes) {
+            nodes.set(id, node);
+            hierarchyNodesAdded++;
+          }
+        }
+        for (const edge of siblingHierarchy.edges) {
+          if (nodes.has(edge.source) && nodes.has(edge.target)) {
+            const exists = edges.some(
+              (e) => e.source === edge.source && e.target === edge.target && e.kind === edge.kind
+            );
+            if (!exists) {
+              edges.push(edge);
+            }
+          }
+        }
+      }
     }
 
     // Traverse from each entry point

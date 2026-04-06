@@ -720,6 +720,52 @@ export class QueryBuilder {
     return allResults.slice(0, limit);
   }
 
+  /**
+   * Find nodes whose name contains a substring (LIKE-based).
+   * Useful for CamelCase-part matching where FTS fails because
+   * e.g. "TransportSearchAction" is one FTS token, not matchable by "Search"*.
+   *
+   * Results are ordered by name length (shorter = more likely to be the core type).
+   */
+  findNodesByNameSubstring(
+    substring: string,
+    options: SearchOptions & { excludePrefix?: boolean } = {}
+  ): SearchResult[] {
+    const { kinds, languages, limit = 30, excludePrefix } = options;
+
+    let sql = `
+      SELECT nodes.*, 1.0 as score
+      FROM nodes
+      WHERE name LIKE ?
+    `;
+    const params: (string | number)[] = [`%${substring}%`];
+
+    // Exclude prefix matches (handled by FTS-based prefix search in Step 2b)
+    if (excludePrefix) {
+      sql += ` AND name NOT LIKE ?`;
+      params.push(`${substring}%`);
+    }
+
+    if (kinds && kinds.length > 0) {
+      sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`;
+      params.push(...kinds);
+    }
+
+    if (languages && languages.length > 0) {
+      sql += ` AND language IN (${languages.map(() => '?').join(',')})`;
+      params.push(...languages);
+    }
+
+    sql += ' ORDER BY length(name) ASC LIMIT ?';
+    params.push(limit);
+
+    const rows = this.db.prepare(sql).all(...params) as (NodeRow & { score: number })[];
+    return rows.map((row) => ({
+      node: rowToNode(row),
+      score: row.score,
+    }));
+  }
+
   // ===========================================================================
   // Edge Operations
   // ===========================================================================
