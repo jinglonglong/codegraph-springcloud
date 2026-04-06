@@ -235,7 +235,7 @@ async function test() {
   const node = results[0].node;
   console.log(\`Impact analysis for: \${node.name} (\${node.kind}) — \${node.filePath}\`);
 
-  const impact = cg.getImpactRadius(node.id, { depth: 2 });
+  const impact = cg.getImpactRadius(node.id, 2);
   console.log(\`\nAffected nodes: \${impact.nodes.size}\`);
   console.log(\`Affected edges: \${impact.edges.length}\`);
 
