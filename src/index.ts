@@ -390,16 +390,6 @@ export class CodeGraph {
 
         // Resolve references to create call/import/extends edges
         if (result.success && result.filesIndexed > 0) {
-          // Signal transition so progress bar doesn't hang at "Parsing 100%"
-          options.onProgress?.({
-            phase: 'finalizing',
-            current: 0,
-            total: 0,
-          });
-
-          // Yield so shimmer worker can flush the phase transition to stdout
-          await new Promise(resolve => setImmediate(resolve));
-
           // Get count without loading all refs into memory
           const unresolvedCount = this.queries.getUnresolvedReferencesCount();
 

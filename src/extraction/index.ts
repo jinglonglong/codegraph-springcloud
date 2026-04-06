@@ -51,7 +51,7 @@ const WORKER_RECYCLE_INTERVAL = 250;
  * Progress callback for indexing operations
  */
 export interface IndexProgress {
-  phase: 'scanning' | 'parsing' | 'storing' | 'finalizing' | 'resolving';
+  phase: 'scanning' | 'parsing' | 'storing' | 'resolving';
   current: number;
   total: number;
   currentFile?: string;
@@ -851,15 +851,6 @@ export class ExtractionOrchestrator {
     if (parseWorker) {
       (parseWorker as import('worker_threads').Worker).terminate().catch(() => {});
     }
-
-    // Phase 3: Resolve references
-    onProgress?.({
-      phase: 'resolving',
-      current: 0,
-      total: 1,
-    });
-
-    // TODO: Implement reference resolution in Phase 3
 
     return {
       success: filesIndexed > 0 || errors.filter((e) => e.severity === 'error').length === 0,
