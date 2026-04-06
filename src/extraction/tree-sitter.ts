@@ -368,11 +368,12 @@ export class TreeSitterExtractor {
    * Build qualified name from node stack
    */
   private buildQualifiedName(name: string): string {
-    // Get names from the node stack
-    const parts: string[] = [this.filePath];
+    // Build a qualified name from the semantic hierarchy only (no file path).
+    // The file path is stored separately in filePath and pollutes FTS if included here.
+    const parts: string[] = [];
     for (const nodeId of this.nodeStack) {
       const node = this.nodes.find((n) => n.id === nodeId);
-      if (node) {
+      if (node && node.kind !== 'file') {
         parts.push(node.name);
       }
     }
@@ -523,7 +524,7 @@ export class TreeSitterExtractor {
       isStatic,
     };
     if (receiverType) {
-      extraProps.qualifiedName = `${this.filePath}::${receiverType}::${name}`;
+      extraProps.qualifiedName = `${receiverType}::${name}`;
     }
 
     const methodNode = this.createNode('method', name, node, extraProps);
@@ -1033,6 +1034,7 @@ export class TreeSitterExtractor {
 
     // Go imports: single or grouped (creates one import per spec)
     if (this.language === 'go') {
+      const parentId = this.nodeStack.length > 0 ? this.nodeStack[this.nodeStack.length - 1] : null;
       const extractFromSpec = (spec: SyntaxNode): void => {
         const stringLiteral = spec.namedChildren.find(c => c.type === 'interpreted_string_literal');
         if (stringLiteral) {
@@ -1041,6 +1043,16 @@ export class TreeSitterExtractor {
             this.createNode('import', importPath, spec, {
               signature: getNodeText(spec, this.source).trim(),
             });
+            // Create unresolved reference so the resolver can create imports edges
+            if (parentId) {
+              this.unresolvedReferences.push({
+                fromNodeId: parentId,
+                referenceName: importPath,
+                referenceKind: 'imports',
+                line: spec.startPosition.row + 1,
+                column: spec.startPosition.column,
+              });
+            }
           }
         }
       };
@@ -1673,7 +1685,7 @@ export class TreeSitterExtractor {
 
           // For Pascal methods, also index qualified forms (e.g. TAuthService.Create).
           if (n.kind === 'method') {
-            const qualifiedParts = n.qualifiedName.split('::').slice(1); // drop file path
+            const qualifiedParts = n.qualifiedName.split('::');
             if (qualifiedParts.length >= 2) {
               // Create suffix keys so both "Module.Class.Method" and "Class.Method" can resolve.
               for (let i = 0; i < qualifiedParts.length - 1; i++) {
