@@ -766,6 +766,8 @@ export class ContextBuilder {
     }
 
     // Trim to max nodes if needed
+    let finalNodes = nodes;
+    let finalEdges = edges;
     if (nodes.size > opts.maxNodes) {
       // Prioritize entry points and their direct neighbors
       const priorityIds = new Set(roots);
@@ -779,31 +781,47 @@ export class ContextBuilder {
       }
 
       // Keep priority nodes, then fill remaining slots
-      const trimmedNodes = new Map<string, Node>();
+      finalNodes = new Map<string, Node>();
       for (const id of priorityIds) {
         const node = nodes.get(id);
-        if (node && trimmedNodes.size < opts.maxNodes) {
-          trimmedNodes.set(id, node);
+        if (node && finalNodes.size < opts.maxNodes) {
+          finalNodes.set(id, node);
         }
       }
 
       // Fill remaining from other nodes
       for (const [id, node] of nodes) {
-        if (trimmedNodes.size >= opts.maxNodes) break;
-        if (!trimmedNodes.has(id)) {
-          trimmedNodes.set(id, node);
+        if (finalNodes.size >= opts.maxNodes) break;
+        if (!finalNodes.has(id)) {
+          finalNodes.set(id, node);
         }
       }
 
       // Filter edges to only include kept nodes
-      const trimmedEdges = edges.filter(
-        (e) => trimmedNodes.has(e.source) && trimmedNodes.has(e.target)
+      finalEdges = edges.filter(
+        (e) => finalNodes.has(e.source) && finalNodes.has(e.target)
       );
-
-      return { nodes: trimmedNodes, edges: trimmedEdges, roots };
     }
 
-    return { nodes, edges, roots };
+    // Edge recovery: BFS with many entry points leaves most nodes disconnected.
+    // Discover edges between already-selected nodes to recover connectivity.
+    const recoveryKinds: EdgeKind[] = ['calls', 'extends', 'implements', 'references', 'overrides'];
+    const recoveredEdges = this.queries.findEdgesBetweenNodes(
+      [...finalNodes.keys()],
+      recoveryKinds,
+    );
+    const existingEdgeKeys = new Set(
+      finalEdges.map((e) => `${e.source}:${e.target}:${e.kind}`)
+    );
+    for (const edge of recoveredEdges) {
+      const key = `${edge.source}:${edge.target}:${edge.kind}`;
+      if (!existingEdgeKeys.has(key)) {
+        finalEdges.push(edge);
+        existingEdgeKeys.add(key);
+      }
+    }
+
+    return { nodes: finalNodes, edges: finalEdges, roots };
   }
 
   /**

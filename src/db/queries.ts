@@ -859,6 +859,26 @@ export class QueryBuilder {
     return rows.map(rowToEdge);
   }
 
+  /**
+   * Find all edges where both source and target are in the given node set.
+   * Useful for recovering inter-node connectivity after BFS.
+   */
+  findEdgesBetweenNodes(nodeIds: string[], kinds?: EdgeKind[]): Edge[] {
+    if (nodeIds.length === 0) return [];
+
+    const idsJson = JSON.stringify(nodeIds);
+    let sql = `SELECT * FROM edges WHERE source IN (SELECT value FROM json_each(?)) AND target IN (SELECT value FROM json_each(?))`;
+    const params: string[] = [idsJson, idsJson];
+
+    if (kinds && kinds.length > 0) {
+      sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`;
+      params.push(...kinds);
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as EdgeRow[];
+    return rows.map(rowToEdge);
+  }
+
   // ===========================================================================
   // File Operations
   // ===========================================================================
