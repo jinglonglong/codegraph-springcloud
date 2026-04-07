@@ -122,9 +122,7 @@ function extractSymbolsFromQuery(query: string): string[] {
     'interface', 'interfaces', 'class', 'classes', 'method', 'methods',
     'trigger', 'triggers', 'affected', 'affect', 'affects',
     'else', 'code', 'failing', 'failed', 'silently', 'decide', 'decides',
-    'connect', 'connection', 'connections',
     'return', 'returns', 'returned', 'take', 'takes', 'taken',
-    'send', 'sends', 'receive', 'receives', 'process', 'processes',
     'check', 'checks', 'checked', 'create', 'creates', 'created',
     'read', 'reads', 'write', 'writes', 'written',
     'start', 'starts', 'stop', 'stops', 'run', 'runs', 'running',
@@ -520,9 +518,9 @@ export class ContextBuilder {
           // Multiplicative boost — 2 terms → 2x, 3 terms → 2.5x
           result.score *= 1 + matchCount * 0.5;
         } else {
-          // Dampen single-term matches — they matched a generic word
-          // (e.g., "Execution" or "Shard" alone) not the compound concept
-          result.score *= 0.3;
+          // Mild dampen for single-term matches — they might be generic
+          // but could also be the right result (e.g., "Protocol" class for an IPC query)
+          result.score *= 0.6;
         }
       }
       searchResults.sort((a, b) => b.score - a.score);
@@ -564,7 +562,9 @@ export class ContextBuilder {
           const name = r.node.name;
           const idx = name.indexOf(titleCased);
           if (idx <= 0) continue;
-          if (!/[a-z]/.test(name.charAt(idx - 1))) continue;
+          // Accept CamelCase boundary (lowercase before match) OR
+          // acronym boundary (uppercase before match, e.g., RPCProtocol)
+          if (!/[a-zA-Z]/.test(name.charAt(idx - 1))) continue;
           if (searchIdSet.has(r.node.id)) continue;
           if (isTestFile(r.node.filePath) && !isTestQuery) continue;
 
@@ -592,14 +592,20 @@ export class ContextBuilder {
         }
       }
 
-      // Append CamelCase matches with multi-term boost (guaranteed slots)
+      // Append CamelCase matches with multi-term boost.
+      // These are structurally important (class names containing query terms at
+      // CamelCase boundaries) but score much lower than FTS results. Scale their
+      // scores up so multi-term CamelCase matches can compete with FTS results.
       const camelResults: SearchResult[] = [];
       for (const [, info] of camelNodeTerms) {
-        info.result.score += (info.termCount - 1) * 15;
+        // Multi-term CamelCase matches are extremely relevant — a class matching
+        // 3+ query terms in its name (e.g., ExtensionHostProcess) is almost
+        // certainly what the user wants. Scale aggressively.
+        info.result.score = info.result.score * (1 + info.termCount) + (info.termCount - 1) * 30;
         camelResults.push(info.result);
       }
       camelResults.sort((a, b) => b.score - a.score);
-      const maxCamelTotal = Math.ceil(opts.searchLimit / 2);
+      const maxCamelTotal = opts.searchLimit;
       for (const r of camelResults.slice(0, maxCamelTotal)) {
         searchResults.push(r);
         searchIdSet.add(r.node.id);
@@ -671,6 +677,13 @@ export class ContextBuilder {
     // If someone searches "terminal" and finds `import { TerminalPanel }`,
     // they want the TerminalPanel class, not the import statement
     filteredResults = this.resolveImportsToDefinitions(filteredResults);
+
+    // Cap entry points so traversal budget isn't spread too thin.
+    // With 36 entry points and maxNodes=120, each gets only 3 nodes — useless.
+    // Cap to searchLimit so each entry point gets a meaningful traversal budget.
+    if (filteredResults.length > opts.searchLimit) {
+      filteredResults = filteredResults.slice(0, opts.searchLimit);
+    }
 
     // Add entry points to subgraph
     for (const result of filteredResults) {
