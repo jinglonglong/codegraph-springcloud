@@ -50,6 +50,22 @@ async function loadCodeGraph(): Promise<typeof import('../index')> {
 const importESM = new Function('specifier', 'return import(specifier)') as
   (specifier: string) => Promise<typeof import('@clack/prompts')>;
 
+// Warn about unsupported Node.js versions (Node 25+ has V8 turboshaft WASM bugs)
+const nodeVersion = process.versions.node;
+const nodeMajor = parseInt(nodeVersion.split('.')[0] ?? '0', 10);
+if (nodeMajor >= 25) {
+  console.warn(
+    '\x1b[33m⚠\x1b[0m  CodeGraph may crash on Node.js %s due to a V8 WASM compiler bug in Node 25+.',
+    nodeVersion
+  );
+  console.warn(
+    '   Please use Node.js 22 LTS instead: https://nodejs.org/en/download'
+  );
+  console.warn(
+    '   See: https://github.com/colbymchenry/codegraph/issues/81\n'
+  );
+}
+
 // Check if running with no arguments - run installer
 if (process.argv.length === 2) {
   import('../installer').then(({ runInstaller }) =>
