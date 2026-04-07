@@ -459,6 +459,7 @@ test().catch(console.error);
 | Svelte template function calls invisible (e.g. `class={cn(...)}`) | SvelteExtractor only parsed `<script>` blocks, missing calls in template markup | `src/extraction/svelte-extractor.ts: extractTemplateCalls` scans `{expression}` blocks in template for call patterns |
 | Svelte `$state`/`$derived` rune calls creating noise | Runes are compiler builtins, not real function calls | `src/extraction/svelte-extractor.ts` filters `SVELTE_RUNES` set from unresolved references |
 | Object literal getters/setters extracted as standalone functions | `method_definition` inside `object` literals treated same as class methods | `src/extraction/tree-sitter.ts: extractMethod` skips `method_definition` nodes whose parent is `object`/`object_expression` |
+| JavaScript `class extends` produces zero inheritance edges | JS tree-sitter uses `class_heritage → identifier` (bare), not `class_heritage → extends_clause → identifier` like TypeScript | `src/extraction/tree-sitter.ts: extractInheritance` — handle bare `identifier`/`type_identifier` children when parent is `class_heritage` |
 
 ## After Fixing Issues
 

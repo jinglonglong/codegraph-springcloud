@@ -1688,6 +1688,22 @@ export class TreeSitterExtractor {
         }
       }
 
+      // JavaScript class_heritage has bare identifier without extends_clause wrapper
+      // e.g. `class Foo extends Bar {}` → class_heritage → identifier("Bar")
+      if (
+        (child.type === 'identifier' || child.type === 'type_identifier') &&
+        node.type === 'class_heritage'
+      ) {
+        const name = getNodeText(child, this.source);
+        this.unresolvedReferences.push({
+          fromNodeId: classId,
+          referenceName: name,
+          referenceKind: 'extends',
+          line: child.startPosition.row + 1,
+          column: child.startPosition.column,
+        });
+      }
+
       // Recurse into container nodes (e.g. field_declaration_list in Go structs,
       // class_heritage in TypeScript which wraps extends_clause/implements_clause)
       if (child.type === 'field_declaration_list' || child.type === 'class_heritage') {
