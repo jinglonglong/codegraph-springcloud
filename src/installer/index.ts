@@ -8,8 +8,8 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
-  writeMcpConfig, writePermissions, writeClaudeMd, writeHooks,
-  hasMcpConfig, hasPermissions, hasHooks,
+  writeMcpConfig, writePermissions, writeClaudeMd,
+  hasMcpConfig, hasPermissions,
 } from './config-writer';
 
 import type { InstallLocation } from './config-writer';
@@ -50,7 +50,7 @@ export async function runInstaller(): Promise<void> {
 
   // Step 1: Install globally
   const shouldInstallGlobally = await clack.confirm({
-    message: 'Install codegraph globally? (Required for hooks & MCP server)',
+    message: 'Install codegraph globally? (Required for MCP server)',
     initialValue: true,
   });
 
@@ -70,7 +70,7 @@ export async function runInstaller(): Promise<void> {
       clack.log.warn('Try: sudo npm install -g @colbymchenry/codegraph');
     }
   } else {
-    clack.log.info('Skipped global install — hooks and MCP server may not work without it');
+    clack.log.info('Skipped global install — MCP server may not work without it');
   }
 
   // Step 2: Installation location
@@ -139,11 +139,6 @@ function writeConfigs(
     writePermissions(location);
     clack.log.success(`${permAction} permissions in ${locationLabel}/settings.json`);
   }
-
-  // Hooks
-  const hookAction = hasHooks(location) ? 'Updated' : 'Added';
-  writeHooks(location);
-  clack.log.success(`${hookAction} auto-sync hooks in ${locationLabel}/settings.json`);
 
   // CLAUDE.md
   const claudeMdResult = writeClaudeMd(location);
