@@ -4,7 +4,7 @@ import type { LanguageExtractor } from '../tree-sitter-types';
 
 export const phpExtractor: LanguageExtractor = {
   functionTypes: ['function_definition'],
-  classTypes: ['class_declaration'],
+  classTypes: ['class_declaration', 'trait_declaration'],
   methodTypes: ['method_declaration'],
   interfaceTypes: ['interface_declaration'],
   structTypes: [],
@@ -13,7 +13,8 @@ export const phpExtractor: LanguageExtractor = {
   typeAliasTypes: [],
   importTypes: ['namespace_use_declaration'],
   callTypes: ['function_call_expression', 'member_call_expression', 'scoped_call_expression'],
-  variableTypes: ['property_declaration', 'const_declaration'],
+  variableTypes: ['const_declaration'],
+  fieldTypes: ['property_declaration'],
   nameField: 'name',
   bodyField: 'body',
   paramsField: 'parameters',

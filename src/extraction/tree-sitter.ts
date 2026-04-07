@@ -1151,17 +1151,25 @@ export class TreeSitterExtractor {
     let calleeName = '';
 
     // Java/Kotlin method_invocation has 'object' + 'name' fields instead of 'function'
+    // PHP member_call_expression has 'object' + 'name', scoped_call_expression has 'scope' + 'name'
     const nameField = getChildByField(node, 'name');
-    const objectField = getChildByField(node, 'object');
+    const objectField = getChildByField(node, 'object') || getChildByField(node, 'scope');
 
-    if (nameField && objectField && node.type === 'method_invocation') {
-      // Java-style method call: receiver.method()
+    if (nameField && objectField && (node.type === 'method_invocation' || node.type === 'member_call_expression' || node.type === 'scoped_call_expression')) {
+      // Method call with explicit receiver: receiver.method() / $receiver->method() / ClassName::method()
       const methodName = getNodeText(nameField, this.source);
-      const receiverName = getNodeText(objectField, this.source);
+      let receiverName = getNodeText(objectField, this.source);
+      // Strip PHP $ prefix from variable names
+      receiverName = receiverName.replace(/^\$/, '');
 
       if (methodName) {
-        // Emit receiver.method form for qualified resolution
-        calleeName = `${receiverName}.${methodName}`;
+        // Skip self/this/parent/static receivers — they don't aid resolution
+        const SKIP_RECEIVERS = new Set(['self', 'this', 'cls', 'super', 'parent', 'static']);
+        if (SKIP_RECEIVERS.has(receiverName)) {
+          calleeName = methodName;
+        } else {
+          calleeName = `${receiverName}.${methodName}`;
+        }
       }
     } else {
       const func = getChildByField(node, 'function') || node.namedChild(0);
@@ -1245,6 +1253,7 @@ export class TreeSitterExtractor {
       if (
         child.type === 'extends_clause' ||
         child.type === 'superclass' ||
+        child.type === 'base_clause' || // PHP class extends
         child.type === 'extends_interfaces' // Java interface extends
       ) {
         // Extract parent class/interface names
