@@ -562,34 +562,47 @@ export class ReferenceResolver {
    */
   private isBuiltInOrExternal(ref: UnresolvedRef): boolean {
     const name = ref.referenceName;
+    const isJsTs = ref.language === 'typescript' || ref.language === 'javascript'
+      || ref.language === 'tsx' || ref.language === 'jsx';
 
     // JavaScript/TypeScript built-ins
-    if (JS_BUILT_INS.has(name)) {
+    if (isJsTs && JS_BUILT_INS.has(name)) {
       return true;
     }
 
-    // Common library calls
-    if (name.startsWith('console.') || name.startsWith('Math.') || name.startsWith('JSON.')) {
+    // Common JS/TS library calls (console.log, Math.floor, JSON.parse)
+    if (isJsTs && (name.startsWith('console.') || name.startsWith('Math.') || name.startsWith('JSON.'))) {
       return true;
     }
 
     // React hooks from React itself
-    if (REACT_HOOKS.has(name)) {
+    if (isJsTs && REACT_HOOKS.has(name)) {
       return true;
     }
 
-    // Python built-ins
+    // Python built-ins (bare calls only — dotted calls like console.print are method calls)
     if (ref.language === 'python' && PYTHON_BUILT_INS.has(name)) {
       return true;
     }
 
-    // Python built-in method calls (e.g., list.extend, dict.update, self.xxx)
+    // Python built-in method calls (e.g., list.extend, dict.update)
     if (ref.language === 'python') {
       const dotIdx = name.indexOf('.');
       if (dotIdx > 0) {
         const receiver = name.substring(0, dotIdx);
+        const method = name.substring(dotIdx + 1);
+        // Filter calls on built-in types (list.append, dict.update, etc.)
         if (PYTHON_BUILT_IN_TYPES.has(receiver)) {
           return true;
+        }
+        // Filter built-in methods on non-class receivers
+        // (e.g., items.append where items is a local list variable)
+        // But allow if the capitalized receiver matches a known codebase class
+        if (PYTHON_BUILT_IN_METHODS.has(method)) {
+          const capitalized = receiver.charAt(0).toUpperCase() + receiver.slice(1);
+          if (!this.knownNames?.has(capitalized)) {
+            return true;
+          }
         }
       }
       if (PYTHON_BUILT_IN_METHODS.has(name)) {

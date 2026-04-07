@@ -1139,7 +1139,23 @@ export class TreeSitterExtractor {
           // Go uses selector_expression with 'field', JS/TS uses member_expression with 'property'
           const property = getChildByField(func, 'property') || getChildByField(func, 'field') || func.namedChild(1);
           if (property) {
-            calleeName = getNodeText(property, this.source);
+            const methodName = getNodeText(property, this.source);
+            // Include receiver name for qualified resolution (e.g., console.print → "console.print")
+            // This helps the resolver distinguish method calls from bare function calls
+            // (e.g., Python's console.print() vs builtin print())
+            // Skip self/this/cls as they don't aid resolution
+            const receiver = getChildByField(func, 'object') || getChildByField(func, 'operand') || func.namedChild(0);
+            const SKIP_RECEIVERS = new Set(['self', 'this', 'cls', 'super']);
+            if (receiver && receiver.type === 'identifier') {
+              const receiverName = getNodeText(receiver, this.source);
+              if (!SKIP_RECEIVERS.has(receiverName)) {
+                calleeName = `${receiverName}.${methodName}`;
+              } else {
+                calleeName = methodName;
+              }
+            } else {
+              calleeName = methodName;
+            }
           }
         } else if (func.type === 'scoped_identifier' || func.type === 'scoped_call_expression') {
           // Scoped call: Module::function()
