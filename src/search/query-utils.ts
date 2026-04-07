@@ -107,7 +107,8 @@ export function getStemVariants(term: string): string[] {
  * Also generates stem variants (e.g., "caching"→"cache", "eviction"→"evict")
  * so FTS prefix matching can find related code symbols.
  */
-export function extractSearchTerms(query: string): string[] {
+export function extractSearchTerms(query: string, options?: { stems?: boolean }): string[] {
+  const includeStems = options?.stems !== false;
   const tokens = new Set<string>();
 
   // First, extract and preserve compound identifiers before splitting
@@ -149,16 +150,19 @@ export function extractSearchTerms(query: string): string[] {
   // Generate stem variants for broader FTS matching.
   // "caching" → "cache" finds CacheBuilder; "eviction" → "evict" finds evictEntries.
   // Also enables co-occurrence dampening by increasing term count above 1.
-  const stems = new Set<string>();
-  for (const token of tokens) {
-    for (const variant of getStemVariants(token)) {
-      if (!tokens.has(variant) && !STOP_WORDS.has(variant)) {
-        stems.add(variant);
+  // Stems are skipped when scoring path relevance (stems inflate path scores).
+  if (includeStems) {
+    const stems = new Set<string>();
+    for (const token of tokens) {
+      for (const variant of getStemVariants(token)) {
+        if (!tokens.has(variant) && !STOP_WORDS.has(variant)) {
+          stems.add(variant);
+        }
       }
     }
-  }
-  for (const stem of stems) {
-    tokens.add(stem);
+    for (const stem of stems) {
+      tokens.add(stem);
+    }
   }
 
   return [...tokens];
@@ -169,7 +173,9 @@ export function extractSearchTerms(query: string): string[] {
  * Higher score = more relevant path
  */
 export function scorePathRelevance(filePath: string, query: string): number {
-  const terms = extractSearchTerms(query);
+  // Use base terms only — stem variants inflate path scores by generating
+  // many near-duplicate terms that all match the same path segments.
+  const terms = extractSearchTerms(query, { stems: false });
   if (terms.length === 0) return 0;
 
   const pathLower = filePath.toLowerCase();
@@ -251,13 +257,17 @@ export function nameMatchBonus(nodeName: string, query: string): number {
   const queryLower = query.replace(/[\s]+/g, '').toLowerCase();
 
   // Exact match: query exactly equals the node name
-  if (nameLower === queryLower) return 30;
+  if (nameLower === queryLower) return 80;
 
   // Exact match on a query token: "CacheBuilder build" and node name is "build"
-  if (queryTokens.length > 1 && queryTokens.includes(nameLower)) return 25;
+  if (queryTokens.length > 1 && queryTokens.includes(nameLower)) return 60;
 
-  // Name starts with query (prefix search: "Cache" → "CacheBuilder")
-  if (nameLower.startsWith(queryLower)) return 20;
+  // Name starts with query — scale by length ratio so "Pod"→"Pod" (exact, handled above)
+  // scores much higher than "Pod"→"PodGCControllerOptions" (ratio 0.125).
+  if (nameLower.startsWith(queryLower)) {
+    const ratio = queryLower.length / nameLower.length;
+    return Math.round(10 + 30 * ratio);
+  }
 
   // All camelCase-split terms appear in the name
   if (rawTerms.length > 1) {
