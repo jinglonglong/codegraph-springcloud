@@ -528,6 +528,7 @@ if (receiverType) {
 - [x] **Rust** — `getReceiverType` walks up to parent `impl_item` to extract type name. Also adds `contains` edges from struct to impl methods. Verified against Deno
 - [x] **C** — NOT needed. No methods in C. Strong function/struct/enum extraction with excellent call edge density. Verified against Redis
 - [x] **C++** — NOT needed for header-only libs. `isMisparsedFunction` hook filters macro-caused misparse artifacts (e.g. `NLOHMANN_JSON_NAMESPACE_BEGIN`). `visitFunctionBody` now extracts structural nodes (classes/structs/enums) inside macro-confused "function" bodies. Content-based `.h` detection (`looksLikeCpp` in `grammars.ts`) promotes C++ headers to `cpp` language so classes in `.h` files are extracted. Verified against nlohmann/json and gRPC. Note: out-of-class `Type::method()` definitions would need `getReceiverType` but are uncommon in header-only codebases.
+- [x] **C#** — NOT needed. Methods nested in class body. Added `base_list` handling in `extractInheritance` for C#'s `: Parent, IInterface` syntax. Added `propertyTypes` support for C# `property_declaration` nodes. Fixed `extractField` to handle C#'s nested `variable_declaration > variable_declarator` structure. Verified against Jellyfin
 
 ### Needs Verification
 
@@ -538,4 +539,3 @@ Check these — may need `getReceiverType` if methods are top-level in the AST:
 Verify these DON'T need `getReceiverType` (methods nested in class body):
 
 - [ ] TypeScript
-- [ ] C#

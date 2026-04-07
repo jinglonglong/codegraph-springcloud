@@ -285,6 +285,11 @@ export class TreeSitterExtractor {
     else if (this.extractor.typeAliasTypes.includes(nodeType)) {
       skipChildren = this.extractTypeAlias(node);
     }
+    // Check for class properties (e.g. C# property_declaration)
+    else if (this.extractor.propertyTypes?.includes(nodeType) && this.isInsideClassLikeNode()) {
+      this.extractProperty(node);
+      skipChildren = true;
+    }
     // Check for class fields (e.g. Java field_declaration, C# field_declaration)
     else if (this.extractor.fieldTypes?.includes(nodeType) && this.isInsideClassLikeNode()) {
       this.extractField(node);
@@ -744,6 +749,41 @@ export class TreeSitterExtractor {
   }
 
   /**
+   * Extract a class property declaration (e.g. C# `public string Name { get; set; }`).
+   * Extracts as 'property' kind node inside the owning class.
+   */
+  private extractProperty(node: SyntaxNode): void {
+    if (!this.extractor) return;
+
+    const docstring = getPrecedingDocstring(node, this.source);
+    const visibility = this.extractor.getVisibility?.(node);
+    const isStatic = this.extractor.isStatic?.(node) ?? false;
+
+    // Property name is a direct identifier child
+    const nameNode = getChildByField(node, 'name')
+      || node.namedChildren.find(c => c.type === 'identifier');
+    if (!nameNode) return;
+
+    const name = getNodeText(nameNode, this.source);
+
+    // Get property type from the type child (first named child that isn't modifier or identifier)
+    const typeNode = node.namedChildren.find(
+      c => c.type !== 'modifier' && c.type !== 'modifiers'
+        && c.type !== 'identifier' && c.type !== 'accessor_list'
+        && c.type !== 'accessors' && c.type !== 'equals_value_clause'
+    );
+    const typeText = typeNode ? getNodeText(typeNode, this.source) : undefined;
+    const signature = typeText ? `${typeText} ${name}` : name;
+
+    this.createNode('property', name, node, {
+      docstring,
+      signature,
+      visibility,
+      isStatic,
+    });
+  }
+
+  /**
    * Extract a class field declaration (e.g. Java field_declaration, C# field_declaration).
    * Extracts each declarator as a 'field' kind node inside the owning class.
    */
@@ -754,22 +794,34 @@ export class TreeSitterExtractor {
     const visibility = this.extractor.getVisibility?.(node);
     const isStatic = this.extractor.isStatic?.(node) ?? false;
 
-    // Java field_declaration: "private final String name = value;"
-    // Children include modifiers, type, variable_declarator(s)
-    const declarators = node.namedChildren.filter(
+    // Java field_declaration: "private final String name = value;" → variable_declarator(s) are direct children
+    // C# field_declaration: wraps in variable_declaration → variable_declarator(s)
+    let declarators = node.namedChildren.filter(
       c => c.type === 'variable_declarator'
     );
+    // C#: look inside variable_declaration wrapper
+    if (declarators.length === 0) {
+      const varDecl = node.namedChildren.find(c => c.type === 'variable_declaration');
+      if (varDecl) {
+        declarators = varDecl.namedChildren.filter(c => c.type === 'variable_declarator');
+      }
+    }
 
     if (declarators.length > 0) {
       // Get field type from the type child
-      const typeNode = node.namedChildren.find(
-        c => c.type !== 'modifiers' && c.type !== 'variable_declarator'
-          && c.type !== 'marker_annotation' && c.type !== 'annotation'
+      // Java: type is a direct child of field_declaration
+      // C#: type is inside variable_declaration wrapper
+      const varDecl = node.namedChildren.find(c => c.type === 'variable_declaration');
+      const typeSearchNode = varDecl ?? node;
+      const typeNode = typeSearchNode.namedChildren.find(
+        c => c.type !== 'modifiers' && c.type !== 'modifier' && c.type !== 'variable_declarator'
+          && c.type !== 'variable_declaration' && c.type !== 'marker_annotation' && c.type !== 'annotation'
       );
       const typeText = typeNode ? getNodeText(typeNode, this.source) : undefined;
 
       for (const decl of declarators) {
-        const nameNode = getChildByField(decl, 'name');
+        const nameNode = getChildByField(decl, 'name')
+          || decl.namedChildren.find(c => c.type === 'identifier');
         if (!nameNode) continue;
         const name = getNodeText(nameNode, this.source);
         const signature = typeText ? `${typeText} ${name}` : name;
@@ -1484,6 +1536,27 @@ export class TreeSitterExtractor {
               referenceKind: 'extends',
               line: posNode.startPosition.row + 1,
               column: posNode.startPosition.column,
+            });
+          }
+        }
+      }
+
+      // C#: `class Movie : BaseItem, IPlugin` → base_list with identifier children
+      // base_list combines both base class and interfaces in a single colon-separated list.
+      // We emit all as 'extends' since the syntax doesn't distinguish them.
+      if (child.type === 'base_list') {
+        for (const baseType of child.namedChildren) {
+          if (baseType) {
+            // For generic base types like `ClientBase<T>`, extract just the type name
+            const name = baseType.type === 'generic_name'
+              ? getNodeText(baseType.namedChildren.find((c: SyntaxNode) => c.type === 'identifier') ?? baseType, this.source)
+              : getNodeText(baseType, this.source);
+            this.unresolvedReferences.push({
+              fromNodeId: classId,
+              referenceName: name,
+              referenceKind: 'extends',
+              line: baseType.startPosition.row + 1,
+              column: baseType.startPosition.column,
             });
           }
         }

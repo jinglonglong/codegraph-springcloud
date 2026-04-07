@@ -100,6 +100,8 @@ export interface LanguageExtractor {
   variableTypes: string[];
   /** Node types that represent class fields (extracted as 'field' kind inside class bodies) */
   fieldTypes?: string[];
+  /** Node types that represent class properties (extracted as 'property' kind inside class bodies) */
+  propertyTypes?: string[];
 
   // --- Field name mappings ---
 

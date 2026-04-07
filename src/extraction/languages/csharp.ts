@@ -15,6 +15,7 @@ export const csharpExtractor: LanguageExtractor = {
   callTypes: ['invocation_expression'],
   variableTypes: ['local_declaration_statement'],
   fieldTypes: ['field_declaration'],
+  propertyTypes: ['property_declaration'],
   nameField: 'name',
   bodyField: 'body',
   paramsField: 'parameter_list',
