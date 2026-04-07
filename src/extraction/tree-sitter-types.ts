@@ -198,4 +198,12 @@ export interface LanguageExtractor {
    * structural nodes (classes, structs, enums).
    */
   isMisparsedFunction?: (name: string, node: SyntaxNode) => boolean;
+
+  /**
+   * Detect bare method calls that don't use call expression syntax.
+   * Used by Ruby where `reset` (no parens, no receiver) is a method call but
+   * tree-sitter parses it as a plain `identifier` node instead of `call`/`method_call`.
+   * Returns the callee name if this node is a bare call, or undefined if not.
+   */
+  extractBareCall?: (node: SyntaxNode, source: string) => string | undefined;
 }

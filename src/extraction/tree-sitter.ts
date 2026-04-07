@@ -1391,6 +1391,20 @@ export class TreeSitterExtractor {
 
       if (this.extractor!.callTypes.includes(nodeType)) {
         this.extractCall(node);
+      } else if (this.extractor!.extractBareCall) {
+        const calleeName = this.extractor!.extractBareCall(node, this.source);
+        if (calleeName && this.nodeStack.length > 0) {
+          const callerId = this.nodeStack[this.nodeStack.length - 1];
+          if (callerId) {
+            this.unresolvedReferences.push({
+              fromNodeId: callerId,
+              referenceName: calleeName,
+              referenceKind: 'calls',
+              line: node.startPosition.row + 1,
+              column: node.startPosition.column,
+            });
+          }
+        }
       }
 
       // Extract structural nodes found inside function bodies.

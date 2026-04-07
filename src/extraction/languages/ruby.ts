@@ -38,6 +38,35 @@ export const rubyExtractor: LanguageExtractor = {
     ctx.popScope();
     return true; // handled
   },
+  extractBareCall: (node, _source) => {
+    // Ruby bare method calls (no parens, no receiver) parse as plain identifiers.
+    // e.g., `reset` in a method body is `identifier "reset"` not a `call` node.
+    if (node.type !== 'identifier') return undefined;
+
+    const parent = node.parent;
+    if (!parent) return undefined;
+
+    // Only statement-level identifiers — direct children of block/body nodes
+    const BLOCK_PARENTS = new Set([
+      'body_statement', 'then', 'else', 'do', 'begin',
+      'rescue', 'ensure', 'when',
+    ]);
+    if (!BLOCK_PARENTS.has(parent.type)) return undefined;
+
+    const name = node.text;
+
+    // Skip Ruby keywords/literals
+    const SKIP = new Set([
+      'true', 'false', 'nil', 'self', 'super',
+      '__FILE__', '__LINE__', '__dir__',
+    ]);
+    if (SKIP.has(name)) return undefined;
+
+    // Skip constants (uppercase start) — these are class/module refs, not calls
+    if (name.length > 0 && name.charCodeAt(0) >= 65 && name.charCodeAt(0) <= 90) return undefined;
+
+    return name;
+  },
   getVisibility: (node) => {
     // Ruby visibility is based on preceding visibility modifiers
     let sibling = node.previousNamedSibling;
