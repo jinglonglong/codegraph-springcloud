@@ -1134,9 +1134,10 @@ export class TreeSitterExtractor {
       const func = getChildByField(node, 'function') || node.namedChild(0);
 
       if (func) {
-        if (func.type === 'member_expression' || func.type === 'attribute') {
-          // Method call: obj.method()
-          const property = getChildByField(func, 'property') || func.namedChild(1);
+        if (func.type === 'member_expression' || func.type === 'attribute' || func.type === 'selector_expression') {
+          // Method call: obj.method() or obj.field.method()
+          // Go uses selector_expression with 'field', JS/TS uses member_expression with 'property'
+          const property = getChildByField(func, 'property') || getChildByField(func, 'field') || func.namedChild(1);
           if (property) {
             calleeName = getNodeText(property, this.source);
           }
