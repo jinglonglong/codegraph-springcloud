@@ -33,12 +33,19 @@ function extractName(node: SyntaxNode, source: string, extractor: LanguageExtrac
   // Try field name first
   const nameNode = getChildByField(node, extractor.nameField);
   if (nameNode) {
-    // Handle complex declarators (C/C++)
-    if (nameNode.type === 'function_declarator' || nameNode.type === 'declarator') {
-      const innerName = getChildByField(nameNode, 'declarator') || nameNode.namedChild(0);
-      return innerName ? getNodeText(innerName, source) : getNodeText(nameNode, source);
+    // Unwrap pointer_declarator(s) for C/C++ pointer return types
+    let resolved = nameNode;
+    while (resolved.type === 'pointer_declarator') {
+      const inner = getChildByField(resolved, 'declarator') || resolved.namedChild(0);
+      if (!inner) break;
+      resolved = inner;
     }
-    return getNodeText(nameNode, source);
+    // Handle complex declarators (C/C++)
+    if (resolved.type === 'function_declarator' || resolved.type === 'declarator') {
+      const innerName = getChildByField(resolved, 'declarator') || resolved.namedChild(0);
+      return innerName ? getNodeText(innerName, source) : getNodeText(resolved, source);
+    }
+    return getNodeText(resolved, source);
   }
 
   // For Dart method_signature, look inside inner signature types
@@ -601,6 +608,10 @@ export class TreeSitterExtractor {
   private extractStruct(node: SyntaxNode): void {
     if (!this.extractor) return;
 
+    // Skip forward declarations and type references (no body = not a definition)
+    const body = getChildByField(node, this.extractor.bodyField);
+    if (!body) return;
+
     const name = extractName(node, this.source, this.extractor);
     const docstring = getPrecedingDocstring(node, this.source);
     const visibility = this.extractor.getVisibility?.(node);
@@ -618,7 +629,6 @@ export class TreeSitterExtractor {
 
     // Push to stack for field extraction
     this.nodeStack.push(structNode.id);
-    const body = getChildByField(node, this.extractor.bodyField) || node;
     for (let i = 0; i < body.namedChildCount; i++) {
       const child = body.namedChild(i);
       if (child) {
@@ -633,6 +643,11 @@ export class TreeSitterExtractor {
    */
   private extractEnum(node: SyntaxNode): void {
     if (!this.extractor) return;
+
+    // Skip forward declarations and type references (no body = not a definition)
+    const body = this.extractor.resolveBody?.(node, this.extractor.bodyField)
+      ?? getChildByField(node, this.extractor.bodyField);
+    if (!body) return;
 
     const name = extractName(node, this.source, this.extractor);
     const docstring = getPrecedingDocstring(node, this.source);
@@ -651,9 +666,6 @@ export class TreeSitterExtractor {
 
     // Push to stack and visit body children (enum members, nested types, methods)
     this.nodeStack.push(enumNode.id);
-    const body = this.extractor.resolveBody?.(node, this.extractor.bodyField)
-      ?? getChildByField(node, this.extractor.bodyField)
-      ?? node;
 
     const memberTypes = this.extractor.enumMemberTypes;
     for (let i = 0; i < body.namedChildCount; i++) {
