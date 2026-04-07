@@ -534,6 +534,7 @@ if (receiverType) {
 - [x] **C#** — NOT needed. Methods nested in class body. Added `base_list` handling in `extractInheritance` for C#'s `: Parent, IInterface` syntax. Added `propertyTypes` support for C# `property_declaration` nodes. Fixed `extractField` to handle C#'s nested `variable_declaration > variable_declarator` structure. Verified against Jellyfin
 - [x] **Ruby** — NOT needed for `getReceiverType`. Methods nested in class body. Added `visitNode` hook to extract Ruby `module` nodes (concerns, namespaces) with proper containment and qualified names. Methods inside modules get `Module::method` qualified names. Also wired up the `ExtractorContext` with `pushScope`/`popScope` for language hooks. Verified against Discourse
 - [x] **TypeScript** — NOT needed for `getReceiverType`. Methods nested in class body. Added `abstract_class_declaration` to `classTypes` so abstract classes are properly extracted. Fixed single-expression arrow function extraction (`const fn = () => expr` was silently dropped because `extractName` picked up the body identifier instead of returning `<anonymous>` for parent name resolution). Verified against Grafana
+- [x] **Dart** — NOT needed for `getReceiverType`. Methods nested in class body. Added bare call extraction for selector-based method calls (e.g. `object.method()`). Verified against Flutter
 
 ### Needs Verification
 
