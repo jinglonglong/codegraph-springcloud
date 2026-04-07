@@ -590,6 +590,12 @@ export class TreeSitterExtractor {
     // Languages with methodsAreTopLevel (e.g. Go) always treat them as methods
     // Languages with getReceiverType (e.g. Rust) extract as method when receiver is found
     if (!this.isInsideClassLikeNode() && !this.extractor.methodsAreTopLevel && !receiverType) {
+      // Skip method_definition nodes inside object literals (getters/setters/methods
+      // in inline objects). These are ephemeral and create noise (e.g., Svelte context
+      // objects: `ctx.set({ get view() { ... } })`).
+      if (node.parent?.type === 'object' || node.parent?.type === 'object_expression') {
+        return;
+      }
       // Not inside a class-like node and no receiver type, treat as function
       this.extractFunction(node);
       return;
@@ -929,6 +935,11 @@ export class TreeSitterExtractor {
           const valueNode = getChildByField(child, 'value');
 
           if (nameNode) {
+            // Skip destructured patterns (e.g., `let { x, y } = $props()` in Svelte)
+            // These produce ugly multi-line names like "{ class: className }"
+            if (nameNode.type === 'object_pattern' || nameNode.type === 'array_pattern') {
+              continue;
+            }
             const name = getNodeText(nameNode, this.source);
             // Arrow functions / function expressions: extract as function instead of variable
             if (valueNode && (valueNode.type === 'arrow_function' || valueNode.type === 'function_expression')) {
