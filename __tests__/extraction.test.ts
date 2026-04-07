@@ -1076,6 +1076,50 @@ fun regularFunction(): String {
     expect(funcNode).toBeDefined();
     expect(funcNode?.name).toBe('regularFunction');
   });
+
+  it('should extract fun interface with annotation on method (Pattern 2b)', () => {
+    // When the SAM method has annotations like @Throws, tree-sitter produces a different
+    // misparse: function_declaration > ERROR("interface Name {") instead of
+    // function_declaration > user_type("interface"). This is the OkHttp Interceptor pattern.
+    const code = `
+import java.io.IOException
+
+fun interface Interceptor {
+  @Throws(IOException::class)
+  fun intercept(chain: Chain): Response
+}
+`;
+    const result = extractFromSource('interceptor.kt', code);
+
+    const ifaceNode = result.nodes.find((n) => n.kind === 'interface');
+    expect(ifaceNode).toBeDefined();
+    expect(ifaceNode?.name).toBe('Interceptor');
+  });
+
+  it('should extract methods from interface with nested fun interface', () => {
+    // When an interface contains a nested `fun interface`, tree-sitter misparsed
+    // the parent body as ERROR. Methods inside should still be extracted.
+    const code = `
+interface WebSocket {
+  fun request(): Request
+  fun send(text: String): Boolean
+  fun cancel()
+  fun interface Factory {
+    fun newWebSocket(request: Request): WebSocket
+  }
+}
+`;
+    const result = extractFromSource('websocket.kt', code);
+
+    const wsIface = result.nodes.find((n) => n.kind === 'interface' && n.name === 'WebSocket');
+    expect(wsIface).toBeDefined();
+
+    const methods = result.nodes.filter((n) => n.kind === 'method' && n.qualifiedName?.startsWith('WebSocket::'));
+    const methodNames = methods.map((m) => m.name);
+    expect(methodNames).toContain('request');
+    expect(methodNames).toContain('send');
+    expect(methodNames).toContain('cancel');
+  });
 });
 
 describe('Dart Extraction', () => {

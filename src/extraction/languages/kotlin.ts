@@ -14,6 +14,16 @@ function isFunInterfaceNode(node: SyntaxNode): boolean {
       const typeId = child.namedChildren.find((c: SyntaxNode) => c.type === 'type_identifier');
       if (typeId && typeId.text === 'interface') hasInterfaceType = true;
     }
+    // Pattern 2b: user_type("interface") is inside an ERROR child
+    if (child.type === 'ERROR') {
+      for (let j = 0; j < child.childCount; j++) {
+        const gc = child.child(j);
+        if (gc && gc.type === 'user_type') {
+          const typeId = gc.namedChildren.find((c: SyntaxNode) => c.type === 'type_identifier');
+          if (typeId && typeId.text === 'interface') hasInterfaceType = true;
+        }
+      }
+    }
   }
   return hasFun && hasInterfaceType;
 }
@@ -49,15 +59,43 @@ export const kotlinExtractor: LanguageExtractor = {
 
     if (node.type !== 'ERROR' && node.type !== 'function_declaration') return false;
 
+    // Skip ERROR nodes that are class bodies (start with `{`). These contain parent
+    // methods + trailing `fun interface` tokens. The methods are extracted via
+    // resolveBody; handling the ERROR here would consume the whole body.
+    if (node.type === 'ERROR') {
+      const firstChild = node.child(0);
+      if (firstChild && firstChild.type === '{') return false;
+    }
+
     if (!isFunInterfaceNode(node)) return false;
 
-    // Extract the interface name from simple_identifier child
+    // Extract the interface name.
+    // For function_declaration misparses (patterns 2a/2b), the real name is inside
+    // an ERROR child — direct simple_identifier children are the misparsed method name.
     let nameText: string | null = null;
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child && child.type === 'simple_identifier') {
-        nameText = child.text;
-        break;
+    if (node.type === 'function_declaration') {
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child && child.type === 'ERROR') {
+          for (let j = 0; j < child.childCount; j++) {
+            const gc = child.child(j);
+            if (gc && gc.type === 'simple_identifier') {
+              nameText = gc.text;
+              break;
+            }
+          }
+          if (nameText) break;
+        }
+      }
+    }
+    // Fallback: direct simple_identifier child (Pattern 1: ERROR node at top level)
+    if (!nameText) {
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child && child.type === 'simple_identifier') {
+          nameText = child.text;
+          break;
+        }
       }
     }
     if (!nameText) return false;
@@ -96,8 +134,19 @@ export const kotlinExtractor: LanguageExtractor = {
     // Kotlin's tree-sitter grammar doesn't use field names, so getChildByField fails.
     // Find body by type: function_body for functions/methods, class_body for classes,
     // enum_class_body for enums.
+    //
+    // Special case: when a class/interface contains a nested `fun interface`, tree-sitter
+    // misparsed the parent's body as an ERROR node (starting with `{`) and creates
+    // a class_body sibling for the nested interface's body. Prefer the ERROR body
+    // so the parent's methods are extracted.
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);
+      if (child && child.type === 'ERROR') {
+        const firstChild = child.child(0);
+        if (firstChild && firstChild.type === '{') {
+          return child;
+        }
+      }
       if (child && (child.type === 'function_body' || child.type === 'class_body' || child.type === 'enum_class_body')) {
         return child;
       }
