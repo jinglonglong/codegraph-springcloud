@@ -54,6 +54,9 @@ export class SvelteExtractor {
       // Extract function calls from template expressions ({fn(...)})
       this.extractTemplateCalls(componentNode.id, scriptBlocks);
 
+      // Extract component usages from template (<ComponentName>)
+      this.extractTemplateComponents(componentNode.id);
+
       // Filter out Svelte rune calls ($state, $props, $derived, etc.)
       this.unresolvedReferences = this.unresolvedReferences.filter(
         ref => !SVELTE_RUNES.has(ref.referenceName)
@@ -270,6 +273,50 @@ export class SvelteExtractor {
             language: 'svelte',
           });
         }
+      }
+    }
+  }
+
+  /**
+   * Extract component usages from the Svelte template.
+   *
+   * PascalCase tags like <Modal>, <Button />, <DevServerPreview> represent
+   * component instantiations — analogous to function calls in imperative code.
+   * Capturing these creates graph edges from parent to child components and
+   * gives codegraph_explore anchor points in the template markup.
+   */
+  private extractTemplateComponents(componentNodeId: string): void {
+    // Build ranges covered by <script> and <style> blocks to skip them
+    const coveredRanges: Array<[number, number]> = [];
+    const tagRegex = /<(script|style)(\s[^>]*)?>[\s\S]*?<\/\1>/g;
+    let tagMatch;
+    while ((tagMatch = tagRegex.exec(this.source)) !== null) {
+      const startLine = (this.source.substring(0, tagMatch.index).match(/\n/g) || []).length;
+      const endLine = startLine + (tagMatch[0].match(/\n/g) || []).length;
+      coveredRanges.push([startLine, endLine]);
+    }
+
+    const lines = this.source.split('\n');
+    // Match PascalCase opening/self-closing tags (closing tags </Foo> start with </ so won't match)
+    const componentTagRegex = /<([A-Z][a-zA-Z0-9_$]*)\b/g;
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+      if (coveredRanges.some(([start, end]) => lineIdx >= start && lineIdx <= end)) continue;
+
+      const line = lines[lineIdx]!;
+      let match;
+      while ((match = componentTagRegex.exec(line)) !== null) {
+        const componentName = match[1]!;
+
+        this.unresolvedReferences.push({
+          fromNodeId: componentNodeId,
+          referenceName: componentName,
+          referenceKind: 'references',
+          line: lineIdx + 1, // 1-indexed
+          column: match.index + 1,
+          filePath: this.filePath,
+          language: 'svelte',
+        });
       }
     }
   }

@@ -81,8 +81,14 @@ export class GraphTraverser {
         continue;
       }
 
-      // Get adjacent edges
+      // Get adjacent edges, prioritizing structural edges (contains, calls)
+      // over reference edges so BFS discovers internal structure before
+      // fanning out to external references (e.g., component usages in templates).
       const adjacentEdges = this.getAdjacentEdges(node.id, opts.direction, opts.edgeKinds);
+      adjacentEdges.sort((a, b) => {
+        const priority = (e: Edge) => e.kind === 'contains' ? 0 : e.kind === 'calls' ? 1 : 2;
+        return priority(a) - priority(b);
+      });
 
       for (const adjEdge of adjacentEdges) {
         // Determine next node: for 'both' direction, edges can be either

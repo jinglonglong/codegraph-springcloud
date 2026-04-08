@@ -658,11 +658,14 @@ export class ToolHandler {
     const maxFiles = clamp((args.maxFiles as number) || 12, 1, 20);
     const projectRoot = cg.getProjectRoot();
 
-    // Step 1: Find relevant context with generous parameters
+    // Step 1: Find relevant context with generous parameters.
+    // Use a large maxNodes budget — explore has its own 35k char output limit
+    // that prevents context bloat, so more nodes just means better coverage
+    // across entry points (especially for large files like Svelte components).
     const subgraph = await cg.findRelevantContext(query, {
       searchLimit: 8,
       traversalDepth: 3,
-      maxNodes: 80,
+      maxNodes: 200,
       minScore: 0.2,
     });
 
@@ -802,10 +805,34 @@ export class ToolHandler {
 
       // Cluster nearby symbols to avoid reading huge gaps between distant symbols.
       // Sort by start line, then merge overlapping/adjacent ranges (within 15 lines).
-      const ranges = group.nodes
+      // Include both node ranges AND edge source locations so template sections
+      // with component usages/calls are covered (not just script block symbols).
+      const ranges: Array<{ start: number; end: number; name: string; kind: string }> = group.nodes
         .filter(n => n.startLine > 0 && n.endLine > 0)
-        .map(n => ({ start: n.startLine, end: n.endLine, name: n.name, kind: n.kind }))
-        .sort((a, b) => a.start - b.start);
+        // Skip file/component nodes that span the entire file — they'd create one giant cluster
+        .filter(n => !(n.kind === 'component' && n.startLine === 1 && n.endLine >= fileLines.length - 1))
+        .map(n => ({ start: n.startLine, end: n.endLine, name: n.name, kind: n.kind }));
+
+      // Add edge source locations in this file — captures template references
+      // (component usages, event handlers) that aren't nodes themselves.
+      // Query edges directly from the DB (not just the subgraph) because BFS
+      // traversal may have pruned template reference targets due to node budget.
+      const edgeLines = new Set<string>(); // dedup by "line:name"
+      for (const node of group.nodes) {
+        const outgoing = cg.getOutgoingEdges(node.id);
+        for (const edge of outgoing) {
+          if (!edge.line || edge.line <= 0 || edge.kind === 'contains') continue;
+          const key = `${edge.line}:${edge.target}`;
+          if (edgeLines.has(key)) continue;
+          edgeLines.add(key);
+          // Look up target name from subgraph first, fall back to edge kind
+          const targetNode = subgraph.nodes.get(edge.target);
+          const targetName = targetNode?.name ?? edge.kind;
+          ranges.push({ start: edge.line, end: edge.line, name: targetName, kind: edge.kind });
+        }
+      }
+
+      ranges.sort((a, b) => a.start - b.start);
 
       if (ranges.length === 0) continue;
 

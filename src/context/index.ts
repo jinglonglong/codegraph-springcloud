@@ -437,22 +437,30 @@ export class ContextBuilder {
       logDebug('Text search failed', { query, error: String(error) });
     }
 
-    // Step 4: Merge results, prioritizing exact matches, then text (path-boosted)
-    const seenIds = new Set<string>();
+    // Step 4: Merge results, taking the max score when duplicates appear
+    // across search channels. Exact matches may have lower scores than FTS
+    // results for the same node — use the best score from any channel.
+    const resultById = new Map<string, SearchResult>();
     let searchResults: SearchResult[] = [];
 
-    // Add exact matches first (highest priority)
+    // Add exact matches first
     for (const result of exactMatches) {
-      if (!seenIds.has(result.node.id)) {
-        seenIds.add(result.node.id);
+      const existing = resultById.get(result.node.id);
+      if (existing) {
+        existing.score = Math.max(existing.score, result.score);
+      } else {
+        resultById.set(result.node.id, result);
         searchResults.push(result);
       }
     }
 
-    // Add text search results (includes path relevance scoring from searchNodes)
+    // Add text search results, upgrading scores for duplicates
     for (const result of textResults) {
-      if (!seenIds.has(result.node.id)) {
-        seenIds.add(result.node.id);
+      const existing = resultById.get(result.node.id);
+      if (existing) {
+        existing.score = Math.max(existing.score, result.score);
+      } else {
+        resultById.set(result.node.id, result);
         searchResults.push(result);
       }
     }
@@ -498,6 +506,12 @@ export class ContextBuilder {
         termGroups.push(group);
       }
 
+      // Build a set of exact-match node IDs so we can exempt them from dampening.
+      // When the query is "LiveEditMode DevServerPreview", these are specific
+      // symbols the user asked for — dampening them because they only match 1
+      // term group is counter-productive.
+      const exactMatchIds = new Set(exactMatches.map(r => r.node.id));
+
       for (const result of searchResults) {
         // Check term matches in name (substring) and path DIRECTORIES (exact).
         // Directory segments must match exactly — "search" matches directory
@@ -517,9 +531,10 @@ export class ContextBuilder {
         if (matchCount >= 2) {
           // Multiplicative boost — 2 terms → 2x, 3 terms → 2.5x
           result.score *= 1 + matchCount * 0.5;
-        } else {
+        } else if (!exactMatchIds.has(result.node.id)) {
           // Mild dampen for single-term matches — they might be generic
-          // but could also be the right result (e.g., "Protocol" class for an IPC query)
+          // but could also be the right result (e.g., "Protocol" class for an IPC query).
+          // Exempt exact name matches: they are specific symbols the user queried for.
           result.score *= 0.6;
         }
       }
