@@ -331,12 +331,19 @@ export class TreeSitterExtractor {
       this.extractVariable(node);
       skipChildren = true; // extractVariable handles children
     }
-    // Check for export statements containing non-function variable declarations
-    // e.g. `export const X = create(...)`, `export const X = { ... }`
-    else if (nodeType === 'export_statement') {
-      this.extractExportedVariables(node);
-      // Don't skip children — still need to visit inner nodes (functions, calls, etc.)
-    }
+    // `export_statement` itself is not extracted — the walker descends
+    // into children, where the inner declaration (lexical_declaration,
+    // function_declaration, class_declaration, etc.) is dispatched to
+    // its own extractor. `isExported` walks the parent chain, so the
+    // exported flag is preserved automatically.
+    //
+    // Calling extractExportedVariables here AND descending caused every
+    // `export const X = ...` to produce two nodes for the same symbol —
+    // one kind:'variable' from extractExportedVariables and one
+    // kind:'constant' from extractVariable. The dedicated dispatch is
+    // the correct one (it picks kind from isConst, captures the
+    // initializer signature, and walks type annotations); the
+    // export-statement helper was redundant.
     // Check for imports
     else if (this.extractor.importTypes.includes(nodeType)) {
       this.extractImport(node);
@@ -1213,59 +1220,11 @@ export class TreeSitterExtractor {
     return false;
   }
 
-  /**
-   * Extract an exported variable declaration that isn't a function.
-   * Handles patterns like:
-   *   export const X = create(...)
-   *   export const X = { ... }
-   *   export const X = [...]
-   *   export const X = "value"
-   *
-   * This is called for `export_statement` nodes that contain a
-   * `lexical_declaration` with `variable_declarator` children whose
-   * values are NOT already handled by functionTypes (arrow_function,
-   * function_expression).
-   */
-  private extractExportedVariables(exportNode: SyntaxNode): void {
-    if (!this.extractor) return;
-
-    // Find the lexical_declaration or variable_declaration child
-    for (let i = 0; i < exportNode.namedChildCount; i++) {
-      const decl = exportNode.namedChild(i);
-      if (!decl || (decl.type !== 'lexical_declaration' && decl.type !== 'variable_declaration')) {
-        continue;
-      }
-
-      // Iterate over each variable_declarator in the declaration
-      for (let j = 0; j < decl.namedChildCount; j++) {
-        const declarator = decl.namedChild(j);
-        if (!declarator || declarator.type !== 'variable_declarator') continue;
-
-        const nameNode = getChildByField(declarator, 'name');
-        if (!nameNode) continue;
-        const name = getNodeText(nameNode, this.source);
-
-        // Skip if the value is a function type — those are already handled
-        // by extractFunction via the functionTypes dispatch
-        const value = getChildByField(declarator, 'value');
-        if (value) {
-          const valueType = value.type;
-          if (
-            this.extractor.functionTypes.includes(valueType)
-          ) {
-            continue; // Already handled by extractFunction
-          }
-        }
-
-        const docstring = getPrecedingDocstring(exportNode, this.source);
-
-        this.createNode('variable', name, declarator, {
-          docstring,
-          isExported: true,
-        });
-      }
-    }
-  }
+  // extractExportedVariables removed — the walker now descends into
+  // export_statement children and the inner declaration's dedicated
+  // extractor (extractVariable, extractFunction, extractClass, etc.)
+  // handles the symbol with isExported=true via parent-walk in the
+  // language extractor's isExported predicate.
 
   /**
    * Extract an import

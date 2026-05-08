@@ -376,7 +376,7 @@ export const useUIStore = create<UIState>((set) => ({
 `;
     const result = extractFromSource('store.ts', code);
 
-    const varNode = result.nodes.find((n) => n.kind === 'variable' && n.name === 'useUIStore');
+    const varNode = result.nodes.find((n) => n.kind === 'constant' && n.name === 'useUIStore');
     expect(varNode).toBeDefined();
     expect(varNode?.isExported).toBe(true);
   });
@@ -390,7 +390,7 @@ export const config = {
 `;
     const result = extractFromSource('config.ts', code);
 
-    const varNode = result.nodes.find((n) => n.kind === 'variable' && n.name === 'config');
+    const varNode = result.nodes.find((n) => n.kind === 'constant' && n.name === 'config');
     expect(varNode).toBeDefined();
     expect(varNode?.isExported).toBe(true);
   });
@@ -401,7 +401,7 @@ export const SCREEN_NAMES = ['home', 'settings', 'profile'] as const;
 `;
     const result = extractFromSource('constants.ts', code);
 
-    const varNode = result.nodes.find((n) => n.kind === 'variable' && n.name === 'SCREEN_NAMES');
+    const varNode = result.nodes.find((n) => n.kind === 'constant' && n.name === 'SCREEN_NAMES');
     expect(varNode).toBeDefined();
     expect(varNode?.isExported).toBe(true);
   });
@@ -413,7 +413,7 @@ export const API_VERSION = "v2";
 `;
     const result = extractFromSource('constants.ts', code);
 
-    const variables = result.nodes.filter((n) => n.kind === 'variable');
+    const variables = result.nodes.filter((n) => n.kind === 'constant');
     expect(variables).toHaveLength(2);
     expect(variables.map((n) => n.name).sort()).toEqual(['API_VERSION', 'MAX_RETRIES']);
   });
@@ -457,7 +457,7 @@ export const userSchema = z.object({
 `;
     const result = extractFromSource('schemas.ts', code);
 
-    const varNode = result.nodes.find((n) => n.kind === 'variable' && n.name === 'userSchema');
+    const varNode = result.nodes.find((n) => n.kind === 'constant' && n.name === 'userSchema');
     expect(varNode).toBeDefined();
     expect(varNode?.isExported).toBe(true);
   });
@@ -475,7 +475,7 @@ export const authMachine = createMachine({
 `;
     const result = extractFromSource('machine.ts', code);
 
-    const varNode = result.nodes.find((n) => n.kind === 'variable' && n.name === 'authMachine');
+    const varNode = result.nodes.find((n) => n.kind === 'constant' && n.name === 'authMachine');
     expect(varNode).toBeDefined();
     expect(varNode?.isExported).toBe(true);
   });
