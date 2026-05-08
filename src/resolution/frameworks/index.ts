@@ -9,6 +9,7 @@ import { laravelResolver } from './laravel';
 import { expressResolver } from './express';
 import { reactResolver } from './react';
 import { svelteResolver } from './svelte';
+import { vueResolver } from './vue';
 import { djangoResolver, flaskResolver, fastapiResolver } from './python';
 import { railsResolver } from './ruby';
 import { springResolver } from './java';
@@ -27,6 +28,7 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   expressResolver,
   reactResolver,
   svelteResolver,
+  vueResolver,
   // Python
   djangoResolver,
   flaskResolver,
@@ -91,6 +93,7 @@ export { laravelResolver, FACADE_MAPPINGS } from './laravel';
 export { expressResolver } from './express';
 export { reactResolver } from './react';
 export { svelteResolver } from './svelte';
+export { vueResolver } from './vue';
 export { djangoResolver, flaskResolver, fastapiResolver } from './python';
 export { railsResolver } from './ruby';
 export { springResolver } from './java';

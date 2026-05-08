@@ -22,6 +22,7 @@ import { EXTRACTORS } from './languages';
 import { LiquidExtractor } from './liquid-extractor';
 import { SvelteExtractor } from './svelte-extractor';
 import { DfmExtractor } from './dfm-extractor';
+import { VueExtractor } from './vue-extractor';
 
 // Re-export for backward compatibility
 export { generateNodeId } from './tree-sitter-helpers';
@@ -2486,6 +2487,12 @@ export function extractFromSource(
   // Use custom extractor for Svelte
   if (detectedLanguage === 'svelte') {
     const extractor = new SvelteExtractor(filePath, source);
+    return extractor.extract();
+  }
+
+  // Use custom extractor for Vue
+  if (detectedLanguage === 'vue') {
+    const extractor = new VueExtractor(filePath, source);
     return extractor.extract();
   }
 
