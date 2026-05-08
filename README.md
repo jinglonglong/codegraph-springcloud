@@ -24,14 +24,14 @@ npx @colbymchenry/codegraph
 
 <sub>Interactive installer configures Claude Code automatically</sub>
 
-![1_C_VYnhpys0UHrOuOgpgoyw](https://github.com/user-attachments/assets/f168182f-4d9a-44e0-94d7-08d018cc8a3a)
-
 #### Initialize Projects
 
 ```bash
 cd your-project
 codegraph init -i
 ```
+
+![1_C_VYnhpys0UHrOuOgpgoyw](https://github.com/user-attachments/assets/f168182f-4d9a-44e0-94d7-08d018cc8a3a)
 
 </div>
 
@@ -426,6 +426,7 @@ The `.codegraph/config.json` file controls indexing:
 | C++ | `.cpp`, `.hpp`, `.cc` | Full support |
 | Swift | `.swift` | Full support |
 | Kotlin | `.kt`, `.kts` | Full support |
+| Scala | `.scala`, `.sc` | Full support (classes, traits, methods, type aliases, Scala 3 enums) |
 | Dart | `.dart` | Full support |
 | Svelte | `.svelte` | Full support (script extraction, Svelte 5 runes, SvelteKit routes) |
 | Vue | `.vue` | Full support (script + script-setup extraction, Nuxt page/API/middleware routes) |
