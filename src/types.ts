@@ -84,6 +84,7 @@ export const LANGUAGES = [
   'vue',
   'liquid',
   'pascal',
+  'scala',
   'unknown',
 ] as const;
 
@@ -541,6 +542,9 @@ export const DEFAULT_CONFIG: CodeGraphConfig = {
     '**/*.lpr',
     '**/*.dfm',
     '**/*.fmx',
+    // Scala
+    '**/*.scala',
+    '**/*.sc',
   ],
   exclude: [
     // Version control
