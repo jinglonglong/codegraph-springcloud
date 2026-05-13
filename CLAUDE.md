@@ -139,6 +139,49 @@ CodeGraph provides **code context**, not product requirements. For new features,
 - Edge cases and error handling
 - Acceptance criteria
 
+## Releases
+
+Releases are published to npm **and** mirrored as GitHub Releases on the
+[Releases page](https://github.com/colbymchenry/codegraph/releases), which is
+where most users look for change history. `CHANGELOG.md` at the repo root is
+the source of truth — each GitHub Release's notes are extracted from it.
+
+### Writing changelog entries
+
+When the user asks for a changelog entry for a new version:
+
+1. Add a new `## [X.Y.Z] - YYYY-MM-DD` block at the **top** of `CHANGELOG.md`
+   (directly under the intro, above the previous version).
+2. Group changes under `### Added`, `### Changed`, `### Fixed`, `### Removed`,
+   `### Deprecated`, `### Security` — only include sections that have entries.
+3. Write entries from the **user's perspective**, not the implementation's.
+   Lead with the observable symptom or capability, then mention internals only
+   if a user needs them (e.g., to work around an existing bad install).
+4. Add the link reference at the bottom:
+   `[X.Y.Z]: https://github.com/colbymchenry/codegraph/releases/tag/vX.Y.Z`
+
+### Release commands (the user runs these)
+
+After the changelog entry is written and the version is bumped in `package.json`:
+
+```bash
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "release: X.Y.Z (<one-line summary>)"
+git push
+
+npm publish
+
+git tag vX.Y.Z
+git push origin vX.Y.Z
+gh release create vX.Y.Z \
+  --title "vX.Y.Z" \
+  --notes-file <(awk '/^## \[X.Y.Z\]/,/^## \[/{ if (/^## \[/ && !/X.Y.Z/) exit; print }' CHANGELOG.md)
+```
+
+Do **not** run `npm publish`, `git tag`, `git push`, or `gh release create`
+yourself — these are publish actions that affect shared state. Write the file,
+hand the user the commands.
+
 ## Test Structure
 
 Tests are in `__tests__/` directory with files mirroring the module structure:
