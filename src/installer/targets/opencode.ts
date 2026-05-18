@@ -1,11 +1,14 @@
 /**
  * opencode target.
  *
- *   - MCP server entry to `~/.config/opencode/opencode.json` (global,
- *     XDG-style; `%APPDATA%/opencode/opencode.json` on Windows) or
- *     `./opencode.json` (local).
- *   - No instructions file built in (opencode doesn't have a
- *     conventional agent-rules surface as of 2026-05).
+ *   - MCP server entry to `~/.config/opencode/opencode.jsonc` (global,
+ *     XDG-style; `%APPDATA%/opencode/opencode.jsonc` on Windows) or
+ *     `./opencode.jsonc` (local). Falls back to `opencode.json` when a
+ *     `.json` file already exists; defaults new installs to `.jsonc`
+ *     because that's what opencode itself creates on first run.
+ *   - Instructions to `~/.config/opencode/AGENTS.md` (global) or
+ *     `./AGENTS.md` (local). opencode reads AGENTS.md for agent
+ *     instructions — same convention Codex CLI uses.
  *   - No permissions concept.
  *
  * Config shape uses opencode's wrapper:
@@ -17,11 +20,16 @@
  * The shape differs from Claude/Cursor — opencode uses `mcp.<name>`
  * (not `mcpServers`), takes `command` as a string array combining
  * binary + args, and includes an explicit `enabled` flag.
+ *
+ * Reads + writes go through `jsonc-parser` so any `//` and `/* *\/`
+ * comments the user has added to their `.jsonc` survive idempotent
+ * re-runs.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { parse as parseJsonc, modify, applyEdits } from 'jsonc-parser';
 import {
   AgentTarget,
   DetectionResult,
@@ -30,10 +38,16 @@ import {
   WriteResult,
 } from './types';
 import {
+  atomicWriteFileSync,
   jsonDeepEqual,
-  readJsonFile,
-  writeJsonFile,
+  removeMarkedSection,
+  replaceOrAppendMarkedSection,
 } from './shared';
+import {
+  CODEGRAPH_SECTION_END,
+  CODEGRAPH_SECTION_START,
+  INSTRUCTIONS_TEMPLATE,
+} from '../instructions-template';
 
 function globalConfigDir(): string {
   if (process.platform === 'win32') {
@@ -47,10 +61,39 @@ function globalConfigDir(): string {
   return path.join(xdg, 'opencode');
 }
 
+function configBaseDir(loc: Location): string {
+  return loc === 'global' ? globalConfigDir() : process.cwd();
+}
+
+// Pick existing .jsonc, then .json, default to .jsonc for new files.
+// opencode auto-creates .jsonc on first run, so that's the dominant
+// real-world case and the sensible default for greenfield installs.
 function configPath(loc: Location): string {
-  return loc === 'global'
-    ? path.join(globalConfigDir(), 'opencode.json')
-    : path.join(process.cwd(), 'opencode.json');
+  const dir = configBaseDir(loc);
+  const jsonc = path.join(dir, 'opencode.jsonc');
+  const json = path.join(dir, 'opencode.json');
+  if (fs.existsSync(jsonc)) return jsonc;
+  if (fs.existsSync(json)) return json;
+  return jsonc;
+}
+
+function instructionsPath(loc: Location): string {
+  return path.join(configBaseDir(loc), 'AGENTS.md');
+}
+
+function readConfigText(file: string): string {
+  if (!fs.existsSync(file)) return '';
+  return fs.readFileSync(file, 'utf-8');
+}
+
+function parseConfig(text: string): Record<string, any> {
+  if (!text.trim()) return {};
+  const errors: any[] = [];
+  const result = parseJsonc(text, errors, { allowTrailingComma: true });
+  if (result == null || typeof result !== 'object' || Array.isArray(result)) {
+    return {};
+  }
+  return result as Record<string, any>;
 }
 
 function getOpencodeServerEntry(): { type: string; command: string[]; enabled: boolean } {
@@ -60,6 +103,8 @@ function getOpencodeServerEntry(): { type: string; command: string[]; enabled: b
     enabled: true,
   };
 }
+
+const FORMATTING = { tabSize: 2, insertSpaces: true, eol: '\n' };
 
 class OpencodeTarget implements AgentTarget {
   readonly id = 'opencode' as const;
@@ -72,7 +117,7 @@ class OpencodeTarget implements AgentTarget {
 
   detect(loc: Location): DetectionResult {
     const file = configPath(loc);
-    const config = readJsonFile(file);
+    const config = parseConfig(readConfigText(file));
     const alreadyConfigured = !!config.mcp?.codegraph;
     const installed = loc === 'global'
       ? fs.existsSync(globalConfigDir())
@@ -81,39 +126,48 @@ class OpencodeTarget implements AgentTarget {
   }
 
   install(loc: Location, _opts: InstallOptions): WriteResult {
-    const file = configPath(loc);
-    const existing = readJsonFile(file);
-    const before = existing.mcp?.codegraph;
-    const after = getOpencodeServerEntry();
-
-    if (jsonDeepEqual(before, after)) {
-      return { files: [{ path: file, action: 'unchanged' }] };
-    }
-
-    const created = !fs.existsSync(file);
-    if (!existing.$schema) existing.$schema = 'https://opencode.ai/config.json';
-    if (!existing.mcp) existing.mcp = {};
-    existing.mcp.codegraph = after;
-    writeJsonFile(file, existing);
-    return {
-      files: [{ path: file, action: created ? 'created' : 'updated' }],
-    };
+    const files: WriteResult['files'] = [];
+    files.push(writeMcpEntry(loc));
+    files.push(writeInstructionsEntry(loc));
+    return { files };
   }
 
   uninstall(loc: Location): WriteResult {
+    const files: WriteResult['files'] = [];
     const file = configPath(loc);
-    const config = readJsonFile(file);
-    if (!config.mcp?.codegraph) {
-      return { files: [{ path: file, action: 'not-found' }] };
+
+    if (!fs.existsSync(file)) {
+      files.push({ path: file, action: 'not-found' });
+    } else {
+      const text = readConfigText(file);
+      const config = parseConfig(text);
+      if (!config.mcp?.codegraph) {
+        files.push({ path: file, action: 'not-found' });
+      } else {
+        // Drop our key surgically. Leaves siblings + comments untouched.
+        let edits = modify(text, ['mcp', 'codegraph'], undefined, {
+          formattingOptions: FORMATTING,
+        });
+        let updated = applyEdits(text, edits);
+
+        // If `mcp` is now an empty object, drop the wrapper too.
+        const afterParsed = parseConfig(updated);
+        if (afterParsed.mcp && typeof afterParsed.mcp === 'object' &&
+            Object.keys(afterParsed.mcp).length === 0) {
+          edits = modify(updated, ['mcp'], undefined, { formattingOptions: FORMATTING });
+          updated = applyEdits(updated, edits);
+        }
+
+        atomicWriteFileSync(file, updated);
+        files.push({ path: file, action: 'removed' });
+      }
     }
-    delete config.mcp.codegraph;
-    if (Object.keys(config.mcp).length === 0) {
-      delete config.mcp;
-    }
-    // If the file is now degenerate (only $schema or empty), leave it
-    // — the user may have other config we shouldn't nuke.
-    writeJsonFile(file, config);
-    return { files: [{ path: file, action: 'removed' }] };
+
+    const instr = instructionsPath(loc);
+    const instrAction = removeMarkedSection(instr, CODEGRAPH_SECTION_START, CODEGRAPH_SECTION_END);
+    files.push({ path: instr, action: instrAction });
+
+    return { files };
   }
 
   printConfig(loc: Location): string {
@@ -126,8 +180,65 @@ class OpencodeTarget implements AgentTarget {
   }
 
   describePaths(loc: Location): string[] {
-    return [configPath(loc)];
+    return [configPath(loc), instructionsPath(loc)];
   }
+}
+
+function writeMcpEntry(loc: Location): WriteResult['files'][number] {
+  const file = configPath(loc);
+  const existed = fs.existsSync(file);
+  let text = readConfigText(file);
+
+  // Seed a minimal opencode config when the file is brand-new so
+  // the result is a complete, schema-tagged file (not just a bare
+  // `{ "mcp": {...} }`).
+  if (!text.trim()) {
+    text = '{\n  "$schema": "https://opencode.ai/config.json"\n}\n';
+  }
+
+  const config = parseConfig(text);
+  const before = config.mcp?.codegraph;
+  const after = getOpencodeServerEntry();
+
+  if (jsonDeepEqual(before, after)) {
+    return { path: file, action: 'unchanged' };
+  }
+
+  // Add $schema if the user's existing file is missing it.
+  if (!config.$schema) {
+    const schemaEdits = modify(text, ['$schema'], 'https://opencode.ai/config.json', {
+      formattingOptions: FORMATTING,
+    });
+    text = applyEdits(text, schemaEdits);
+  }
+
+  // Surgical edit — preserves comments, formatting, and order of
+  // every key we don't touch.
+  const edits = modify(text, ['mcp', 'codegraph'], after, {
+    formattingOptions: FORMATTING,
+  });
+  const updated = applyEdits(text, edits);
+  atomicWriteFileSync(file, updated);
+
+  return { path: file, action: existed ? 'updated' : 'created' };
+}
+
+function writeInstructionsEntry(loc: Location): WriteResult['files'][number] {
+  const file = instructionsPath(loc);
+  const dir = path.dirname(file);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const action = replaceOrAppendMarkedSection(
+    file,
+    INSTRUCTIONS_TEMPLATE,
+    CODEGRAPH_SECTION_START,
+    CODEGRAPH_SECTION_END,
+  );
+  const mapped: 'created' | 'updated' | 'unchanged' =
+    action === 'created' ? 'created'
+      : action === 'unchanged' ? 'unchanged'
+        : 'updated';
+  return { path: file, action: mapped };
 }
 
 export const opencodeTarget: AgentTarget = new OpencodeTarget();

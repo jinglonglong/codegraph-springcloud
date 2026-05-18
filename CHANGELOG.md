@@ -7,6 +7,29 @@ a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-05-17
+
+### Fixed
+- **opencode**: install actually wires up the MCP server now. v0.7.7 wrote
+  `~/.config/opencode/opencode.json`, but opencode reads `opencode.jsonc` by
+  default — so the `codegraph` entry never showed up in any opencode session.
+  The installer now prefers an existing `.jsonc`, falls back to `.json` when
+  only that exists, and creates `.jsonc` for greenfield installs. **Re-run
+  `codegraph install --target=opencode` after upgrading** so the entry lands
+  in the file opencode actually reads.
+
+### Added
+- **opencode**: installer now writes `AGENTS.md` (global
+  `~/.config/opencode/AGENTS.md`, local `./AGENTS.md`) with the same
+  codegraph usage guidance the other agents already received. Without it,
+  opencode's model would call native `Grep` instead of the `codegraph_*`
+  tools it could see in its MCP list.
+- User comments and formatting in `opencode.jsonc` survive install /
+  re-install / uninstall round-trips — surgical edits via `jsonc-parser`
+  rather than full-file rewrites.
+
+[0.7.8]: https://github.com/colbymchenry/codegraph/releases/tag/v0.7.8
+
 ## [0.7.7] - 2026-05-17
 
 ### Added

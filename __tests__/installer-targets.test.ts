@@ -98,7 +98,8 @@ describe('Installer targets — contract', () => {
             // and any target with no JSON config — they get covered
             // by their own dedicated tests below.
             const paths = target.describePaths(location);
-            const jsonPath = paths.find((p) => p.endsWith('.json'));
+            // Match .json or .jsonc — opencode prefers .jsonc.
+            const jsonPath = paths.find((p) => /\.jsonc?$/.test(p));
             if (!jsonPath) return;
 
             // Seed pre-existing config.
@@ -182,6 +183,152 @@ describe('Installer targets — partial-state idempotency', () => {
     // Third install — both unchanged (full idempotency restored).
     const third = codex.install('global', { autoAllow: false });
     for (const f of third.files) expect(f.action).toBe('unchanged');
+  });
+
+  it('opencode: prefers .jsonc when both .json and .jsonc exist', () => {
+    const opencode = getTarget('opencode')!;
+    const dir = path.join(tmpHome, '.config', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'opencode.json'), '{\n  "$schema": "https://opencode.ai/config.json"\n}\n');
+    fs.writeFileSync(path.join(dir, 'opencode.jsonc'), '{\n  "$schema": "https://opencode.ai/config.json"\n}\n');
+
+    const result = opencode.install('global', { autoAllow: true });
+    const written = result.files.find((f) => /\.jsonc$/.test(f.path))!;
+    expect(written).toBeDefined();
+    expect(written.action).not.toBe('not-found');
+    // The .json file is left alone.
+    const jsonText = fs.readFileSync(path.join(dir, 'opencode.json'), 'utf-8');
+    expect(jsonText).not.toContain('codegraph');
+  });
+
+  it('opencode: uses .json when only .json exists (no .jsonc)', () => {
+    const opencode = getTarget('opencode')!;
+    const dir = path.join(tmpHome, '.config', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'opencode.json'), '{\n  "$schema": "https://opencode.ai/config.json"\n}\n');
+
+    const result = opencode.install('global', { autoAllow: true });
+    expect(result.files[0].path).toMatch(/opencode\.json$/);
+    expect(fs.existsSync(path.join(dir, 'opencode.jsonc'))).toBe(false);
+  });
+
+  it('opencode: defaults to .jsonc for fresh installs (no existing file)', () => {
+    const opencode = getTarget('opencode')!;
+    const result = opencode.install('global', { autoAllow: true });
+    expect(result.files[0].path).toMatch(/opencode\.jsonc$/);
+    expect(result.files[0].action).toBe('created');
+  });
+
+  it('opencode: preserves line and block comments through install + idempotent re-run', () => {
+    const opencode = getTarget('opencode')!;
+    const dir = path.join(tmpHome, '.config', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'opencode.jsonc');
+    const original = [
+      '{',
+      '  // top-level note about my opencode setup',
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  /* multi-line block comment',
+      '     describing the providers section */',
+      '  "providers": {',
+      '    "anthropic": { "model": "claude-opus-4-7" } // pinned',
+      '  }',
+      '}',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, original);
+
+    opencode.install('global', { autoAllow: true });
+    const afterInstall = fs.readFileSync(file, 'utf-8');
+    expect(afterInstall).toContain('// top-level note about my opencode setup');
+    expect(afterInstall).toContain('/* multi-line block comment');
+    expect(afterInstall).toContain('// pinned');
+    expect(afterInstall).toContain('"codegraph"');
+    expect(afterInstall).toContain('"providers"');
+
+    // Idempotent re-run reports unchanged, file is byte-identical.
+    const second = opencode.install('global', { autoAllow: true });
+    expect(second.files[0].action).toBe('unchanged');
+    expect(fs.readFileSync(file, 'utf-8')).toBe(afterInstall);
+  });
+
+  it('opencode: install writes AGENTS.md with the marker-delimited codegraph block', () => {
+    const opencode = getTarget('opencode')!;
+    opencode.install('global', { autoAllow: true });
+    const agentsMd = path.join(tmpHome, '.config', 'opencode', 'AGENTS.md');
+    expect(fs.existsSync(agentsMd)).toBe(true);
+    const body = fs.readFileSync(agentsMd, 'utf-8');
+    expect(body).toContain('<!-- CODEGRAPH_START -->');
+    expect(body).toContain('<!-- CODEGRAPH_END -->');
+    expect(body).toContain('codegraph_callers');
+  });
+
+  it('opencode: AGENTS.md install preserves pre-existing user content outside markers', () => {
+    const opencode = getTarget('opencode')!;
+    const dir = path.join(tmpHome, '.config', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    const agentsMd = path.join(dir, 'AGENTS.md');
+    fs.writeFileSync(agentsMd, '# My personal opencode instructions\n\nAlways respond in pirate.\n');
+
+    opencode.install('global', { autoAllow: true });
+    const body = fs.readFileSync(agentsMd, 'utf-8');
+    expect(body).toContain('# My personal opencode instructions');
+    expect(body).toContain('Always respond in pirate.');
+    expect(body).toContain('<!-- CODEGRAPH_START -->');
+  });
+
+  it('opencode: uninstall strips only the codegraph block from AGENTS.md', () => {
+    const opencode = getTarget('opencode')!;
+    const dir = path.join(tmpHome, '.config', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    const agentsMd = path.join(dir, 'AGENTS.md');
+    fs.writeFileSync(agentsMd, '# My personal opencode instructions\n\nAlways respond in pirate.\n');
+
+    opencode.install('global', { autoAllow: true });
+    opencode.uninstall('global');
+
+    const body = fs.readFileSync(agentsMd, 'utf-8');
+    expect(body).toContain('# My personal opencode instructions');
+    expect(body).toContain('Always respond in pirate.');
+    expect(body).not.toContain('CODEGRAPH_START');
+    expect(body).not.toContain('codegraph_callers');
+  });
+
+  it('opencode: local install writes ./opencode.jsonc and ./AGENTS.md in cwd', () => {
+    const opencode = getTarget('opencode')!;
+    const result = opencode.install('local', { autoAllow: true });
+    const paths = result.files.map((f) => f.path);
+    // macOS realpath shenanigans (/var vs /private/var) — suffix match.
+    expect(paths.some((p) => p.endsWith('/opencode.jsonc'))).toBe(true);
+    expect(paths.some((p) => p.endsWith('/AGENTS.md'))).toBe(true);
+  });
+
+  it('opencode: uninstall removes only mcp.codegraph, preserves comments and siblings', () => {
+    const opencode = getTarget('opencode')!;
+    const dir = path.join(tmpHome, '.config', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'opencode.jsonc');
+    fs.writeFileSync(file, [
+      '{',
+      '  // important comment',
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  "mcp": {',
+      '    "other": { "type": "local", "command": ["x"], "enabled": true }',
+      '  }',
+      '}',
+      '',
+    ].join('\n'));
+
+    opencode.install('global', { autoAllow: true });
+    const afterInstall = fs.readFileSync(file, 'utf-8');
+    expect(afterInstall).toContain('"codegraph"');
+    expect(afterInstall).toContain('"other"');
+
+    opencode.uninstall('global');
+    const afterUninstall = fs.readFileSync(file, 'utf-8');
+    expect(afterUninstall).not.toContain('codegraph');
+    expect(afterUninstall).toContain('// important comment');
+    expect(afterUninstall).toContain('"other"');
   });
 
   it('codex: user-added key inside [mcp_servers.codegraph] survives idempotent re-install', () => {
