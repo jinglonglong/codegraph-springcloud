@@ -9,6 +9,18 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **MCP / explore**: `codegraph_explore` source sections now carry line
+  numbers (cat -n style `<num>\t<code>`, matching the Read tool). This lets
+  the agent cite `file:line` straight from the explore payload instead of
+  re-opening the file just to find a line number — the dominant residual
+  cost on precise-tracing questions. In an isolated A/B (answer a
+  "which exact line" question with the relevant code already in the
+  payload), the no-line-numbers arm spent 2 file Reads + a grep recovering
+  the line number while the line-numbered arm answered with zero follow-up
+  tool calls. Payload cost is small (~3-5%). Set
+  `CODEGRAPH_EXPLORE_LINENUMS=0` to disable.
+
 ### Changed
 - **MCP / explore**: `codegraph_explore` output is now adaptive to project
   size. The tool used to apply a fixed 35KB cap regardless of how large the
@@ -22,12 +34,23 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (<5,000) caps at ~28KB; large (<15,000) keeps the historical ~35KB; very
   large goes up to ~38KB. A new per-file char cap also prevents a single
   file with many adjacent symbols from collapsing into one whole-file dump
-  (the Alamofire `Session.swift` case from #185). Measured against the
-  same repos used in the README benchmark: Alamofire ~62% smaller per call,
-  Excalidraw ~35%, VS Code ~14%. Agent-trust floor still holds — the
-  Relationships section, scored cluster selection, and structured-source
-  output are all retained. Thanks to
-  [@essopsp](https://github.com/essopsp) for the repro.
+  (the Alamofire `Session.swift` case from #185). Per-file cluster
+  selection ranks clusters that contain a query entry point ahead of dense
+  declaration blocks, and whole-file "envelope" nodes (a class/struct that
+  spans most of the file) are excluded from clustering so the methods the
+  query asked about aren't buried under the container's opening lines.
+  Measured against the same repos used in the README benchmark, end state
+  with line numbers on: Alamofire ~60% smaller per call, Excalidraw ~32%,
+  VS Code ~12%. Agent-trust floor still holds — the Relationships section,
+  scored cluster selection, and structured-source output are all retained.
+  Thanks to [@essopsp](https://github.com/essopsp) for the repro.
+
+### Fixed
+- **MCP**: source-omission markers in `codegraph_explore` and
+  `codegraph_context` output are now language-neutral (`... (gap) ...`,
+  `... (trimmed) ...`, `... (truncated) ...`) instead of C-style `//`
+  comments, which were misleading inside Python, Ruby, and other non-C
+  fenced source blocks.
 
 ## [0.7.10] - 2026-05-19
 

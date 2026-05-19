@@ -143,6 +143,38 @@ export function getExploreOutputBudget(fileCount: number): ExploreOutputBudget {
 }
 
 /**
+ * Whether `codegraph_explore` should prefix source lines with their line
+ * numbers (cat -n style: `<num>\t<code>`).
+ *
+ * Line numbers let the agent cite `file:line` straight from the explore
+ * payload instead of re-Reading the file just to find a line number — the
+ * dominant residual cost on precise-tracing questions (#185 follow-up).
+ *
+ * Defaults ON. Set `CODEGRAPH_EXPLORE_LINENUMS=0` to disable (used by the
+ * A/B harness to measure the payload-cost vs. read-savings tradeoff).
+ */
+function exploreLineNumbersEnabled(): boolean {
+  return process.env.CODEGRAPH_EXPLORE_LINENUMS !== '0';
+}
+
+/**
+ * Prefix each line of a source slice with its 1-based line number, matching
+ * the Read tool's `cat -n` convention (number + tab) so the agent treats it
+ * the same way it treats Read output.
+ *
+ * @param slice  contiguous source text (already extracted from the file)
+ * @param firstLineNumber  the 1-based line number of the slice's first line
+ */
+function numberSourceLines(slice: string, firstLineNumber: number): string {
+  const out: string[] = [];
+  const split = slice.split('\n');
+  for (let i = 0; i < split.length; i++) {
+    out.push(`${firstLineNumber + i}\t${split[i]}`);
+  }
+  return out.join('\n');
+}
+
+/**
  * Mark a Claude session as having consulted MCP tools.
  * This enables Grep/Glob/Bash commands that would otherwise be blocked.
  */
@@ -940,10 +972,19 @@ export class ToolHandler {
       // are worth 10, directly-connected nodes 3, peripheral nodes 1, and
       // bare edge-source lines 2 (less than a connected node but more than
       // a peripheral one — they hint at a reference but aren't a definition).
+      // Container kinds whose body can span most/all of a file. When such a
+      // node covers most of the file we drop it from the ranges: keeping it
+      // would merge every method inside it into one giant cluster spanning
+      // the whole file, which then tail-trims down to just the container's
+      // opening lines (its header/declarations) and buries the methods the
+      // query actually asked about (#185 follow-up — Session.swift in
+      // Alamofire is the canonical case: the `Session` class spans ~1,400
+      // lines). We want the granular symbols inside, not the envelope.
+      const ENVELOPE_KINDS = new Set(['file', 'module', 'class', 'struct', 'interface', 'enum', 'namespace', 'protocol', 'trait', 'component']);
       const ranges: Array<{ start: number; end: number; name: string; kind: string; importance: number }> = group.nodes
         .filter(n => n.startLine > 0 && n.endLine > 0)
-        // Skip file/component nodes that span the entire file — they'd create one giant cluster
-        .filter(n => !(n.kind === 'component' && n.startLine === 1 && n.endLine >= fileLines.length - 1))
+        // Drop whole-file envelope nodes (containers covering >50% of the file).
+        .filter(n => !(ENVELOPE_KINDS.has(n.kind) && (n.endLine - n.startLine + 1) > fileLines.length * 0.5))
         .map(n => {
           let importance = 1;
           if (entryNodeIds.has(n.id)) importance = 10;
@@ -975,12 +1016,13 @@ export class ToolHandler {
       if (ranges.length === 0) continue;
 
       const gapThreshold = budget.gapThreshold;
-      const clusters: Array<{ start: number; end: number; symbols: string[]; score: number }> = [];
+      const clusters: Array<{ start: number; end: number; symbols: string[]; score: number; maxImportance: number }> = [];
       let current = {
         start: ranges[0]!.start,
         end: ranges[0]!.end,
         symbols: [`${ranges[0]!.name}(${ranges[0]!.kind})`],
         score: ranges[0]!.importance,
+        maxImportance: ranges[0]!.importance,
       };
 
       for (let i = 1; i < ranges.length; i++) {
@@ -989,6 +1031,7 @@ export class ToolHandler {
           current.end = Math.max(current.end, r.end);
           current.symbols.push(`${r.name}(${r.kind})`);
           current.score += r.importance;
+          current.maxImportance = Math.max(current.maxImportance, r.importance);
         } else {
           clusters.push(current);
           current = {
@@ -996,6 +1039,7 @@ export class ToolHandler {
             end: r.end,
             symbols: [`${r.name}(${r.kind})`],
             score: r.importance,
+            maxImportance: r.importance,
           };
         }
       }
@@ -1005,25 +1049,36 @@ export class ToolHandler {
       // The pathological case (#185): a file like Session.swift where every
       // method is adjacent collapses into one cluster spanning the whole
       // file, and dumping that into the agent's context is most of the
-      // token cost on small projects. We pick clusters in score order
-      // (importance per line, so we don't prefer one giant low-density
-      // cluster over several focused ones) until the per-file char cap is
-      // hit. Truly enormous single clusters get tail-trimmed with a marker.
+      // token cost on small projects. We pick clusters in priority order
+      // until the per-file char cap is hit. Truly enormous single clusters
+      // get tail-trimmed with a marker.
       const contextPadding = 3;
+      const withLineNumbers = exploreLineNumbersEnabled();
       const buildSection = (c: { start: number; end: number }): string => {
         const startIdx = Math.max(0, c.start - 1 - contextPadding);
         const endIdx = Math.min(fileLines.length, c.end + contextPadding);
-        return fileLines.slice(startIdx, endIdx).join('\n');
+        const slice = fileLines.slice(startIdx, endIdx).join('\n');
+        // startIdx is 0-based, so the slice's first line is line startIdx + 1.
+        return withLineNumbers ? numberSourceLines(slice, startIdx + 1) : slice;
       };
-      const GAP_MARKER = '\n\n// ... (gap) ...\n\n';
+      // Language-neutral separator (no `//` — not a comment in Python, Ruby,
+      // etc.). With line numbers on, the line-number jump also signals the gap.
+      const GAP_MARKER = '\n\n... (gap) ...\n\n';
 
-      // Score clusters by score-per-line (density) so a 30-line cluster
-      // with two entry symbols outranks a 400-line cluster with two
-      // peripheral symbols. Stable tiebreak by score, then by smaller
-      // span (cheaper to include).
+      // Rank clusters for inclusion under the per-file cap. Entry-point
+      // clusters come first: a cluster containing a query entry point
+      // (importance 10) must outrank a dense block of mere declarations,
+      // otherwise on a large file like Session.swift the top-of-file class
+      // header + property list (many adjacent low-importance nodes, high
+      // density) wins the budget and buries the actual methods the query
+      // asked about (perform/didCreateURLRequest/task live deep in the
+      // file). Within the same importance tier, prefer density (score per
+      // line) so we still favor focused clusters over sprawling ones, then
+      // smaller span as a cheap-to-include tiebreak.
       const rankedClusters = clusters
         .map((c, i) => ({ idx: i, span: c.end - c.start + 1, c }))
         .sort((a, b) => {
+          if (b.c.maxImportance !== a.c.maxImportance) return b.c.maxImportance - a.c.maxImportance;
           const densityA = a.c.score / a.span;
           const densityB = b.c.score / b.span;
           if (densityB !== densityA) return densityB - densityA;
@@ -1064,7 +1119,7 @@ export class ToolHandler {
       // If a single chosen cluster is still oversize (long monolithic
       // function), tail-trim it. Better one trimmed view than nothing.
       if (fileSection.length > budget.maxCharsPerFile) {
-        fileSection = fileSection.slice(0, budget.maxCharsPerFile) + '\n// ... trimmed ...';
+        fileSection = fileSection.slice(0, budget.maxCharsPerFile) + '\n... (trimmed) ...';
         fileTrimmed = true;
       }
       if (chosenIndices.size < clusters.length || fileTrimmed) {
@@ -1094,7 +1149,7 @@ export class ToolHandler {
       if (totalChars + fileSection.length + 200 > budget.maxOutputChars) {
         const remaining = budget.maxOutputChars - totalChars - 200;
         if (remaining < 500) break;
-        const trimmed = fileSection.slice(0, remaining) + '\n// ... trimmed ...';
+        const trimmed = fileSection.slice(0, remaining) + '\n... (trimmed) ...';
 
         lines.push(fileHeader);
         lines.push('');

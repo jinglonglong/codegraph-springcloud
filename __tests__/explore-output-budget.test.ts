@@ -188,4 +188,47 @@ describe('codegraph_explore output respects the adaptive budget', () => {
     const sourceFollowsHeader = text.indexOf('### Source Code') > 0;
     expect(hasRelationships || sourceFollowsHeader).toBe(true);
   });
+
+  it('prefixes source lines with line numbers by default (cat -n style)', async () => {
+    delete process.env.CODEGRAPH_EXPLORE_LINENUMS;
+    const result = await handler.execute('codegraph_explore', { query: 'Session method helper' });
+    const text = result.content?.[0]?.text ?? '';
+    // At least one fenced source line should look like `<digits>\t<code>`.
+    expect(/\n\d+\t/.test(text)).toBe(true);
+  });
+
+  it('omits line numbers when CODEGRAPH_EXPLORE_LINENUMS=0', async () => {
+    process.env.CODEGRAPH_EXPLORE_LINENUMS = '0';
+    try {
+      const result = await handler.execute('codegraph_explore', { query: 'Session method helper' });
+      const text = result.content?.[0]?.text ?? '';
+      // The synthetic source has no tab-prefixed numeric lines of its own,
+      // so none should appear when the toggle is off.
+      expect(/\n\d+\t(?:export|  )/.test(text)).toBe(false);
+    } finally {
+      delete process.env.CODEGRAPH_EXPLORE_LINENUMS;
+    }
+  });
+
+  it('uses language-neutral omission markers (no C-style // in the output)', async () => {
+    // The gap/trimmed separators must not assume `//` is a comment — that's
+    // wrong in Python, Ruby, etc. They render inside fenced source blocks.
+    const result = await handler.execute('codegraph_explore', { query: 'Session method helper' });
+    const text = result.content?.[0]?.text ?? '';
+    expect(text).not.toContain('// ... (gap)');
+    expect(text).not.toContain('// ... trimmed');
+  });
+
+  it('does not collapse a whole-file class into just its header (envelope filter)', async () => {
+    // The synthetic `Session` class spans the entire file. Without the
+    // envelope filter it would form one giant cluster that tail-trims to
+    // the class declaration, hiding the methods. Confirm real method bodies
+    // make it into the output. Regression guard for the #185 follow-up.
+    const result = await handler.execute('codegraph_explore', { query: 'Session method helper' });
+    const text = result.content?.[0]?.text ?? '';
+    // A method body line (`methodN(arg: string)`) should appear, not just
+    // the `export class Session {` opener.
+    const hasMethodBody = /method\d+\(arg: string\)/.test(text);
+    expect(hasMethodBody).toBe(true);
+  });
 });
