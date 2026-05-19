@@ -30,13 +30,11 @@ if ! grep -q "^## \[${VERSION}\]" CHANGELOG.md; then
   exit 1
 fi
 
-NOTES=$(awk -v v="${VERSION}" '
-  /^## \[/ {
-    if (p) exit
-    if ($0 ~ "^## \\[" v "\\]") p = 1
-  }
-  p
-' CHANGELOG.md)
+# Extract notes with paragraph unwrapping — GitHub Releases render with
+# GFM hard-breaks, so the CHANGELOG's hard-wrapped lines would show as
+# visible `<br>` breaks otherwise. The helper joins continuation lines
+# into a single line per bullet.
+NOTES=$(node scripts/extract-release-notes.mjs "${VERSION}")
 
 if [ -z "${NOTES}" ]; then
   echo "error: failed to extract changelog notes for ${VERSION}" >&2
