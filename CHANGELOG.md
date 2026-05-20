@@ -7,7 +7,7 @@ a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-05-20
 
 ### Added
 - **Framework routes (NestJS)**: CodeGraph now recognises NestJS projects and
@@ -91,6 +91,18 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   VS Code ~12%. Agent-trust floor still holds — the Relationships section,
   scored cluster selection, and structured-source output are all retained.
   Thanks to [@essopsp](https://github.com/essopsp) for the repro.
+- **Search ranking (Kotlin / Swift / Scala / C#)**: test files in these
+  languages are now correctly de-prioritized in `codegraph_search`,
+  `codegraph_context`, and `codegraph affected`. Detection previously only
+  recognized `snake_case`/`.test.`-style names plus a handful of Java
+  suffixes, so CamelCase test files (`FooTest.kt`, `BarTests.swift`,
+  `BazSpec.scala`, `QuxTestCase.cs`) and Gradle / Kotlin-Multiplatform /
+  Xcode test source-set directories (`jvmTest/`, `commonTest/`,
+  `androidTest/`, `iosTest/`, `integrationTest/`) were treated as production
+  code and could outrank the real implementation. Detection now matches
+  capital-led `*Test` / `*Tests` / `*Spec` / `*TestCase` filenames and
+  source-set directories — deliberately capital-led so lowercase look-alikes
+  like `latest.kt` and `manifest.kt` are not misclassified.
 
 ### Fixed
 - **MCP / explore**: `codegraph_explore` output is now hard-capped to its
@@ -235,6 +247,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       returns `null` instead of resolving to an unrelated `rollback`
       in the same file.
 
+[0.8.0]: https://github.com/colbymchenry/codegraph/releases/tag/v0.8.0
 [0.7.10]: https://github.com/colbymchenry/codegraph/releases/tag/v0.7.10
 
 ## [0.7.8] - 2026-05-17
