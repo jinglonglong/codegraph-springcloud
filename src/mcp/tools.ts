@@ -11,7 +11,6 @@ import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { clamp, validatePathWithinRoot } from '../utils';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { WASM_FALLBACK_FIX_RECIPE } from '../db';
 
 /** Maximum output length to prevent context bloat (characters) */
 const MAX_OUTPUT_LENGTH = 15000;
@@ -540,6 +539,17 @@ export class ToolHandler {
 
     if (!resolvedRoot) {
       throw new Error(`CodeGraph not initialized in ${projectPath}. Run 'codegraph init' in that project first.`);
+    }
+
+    // If the path resolves to the default project, reuse the already-open
+    // default instance rather than opening a SECOND connection to the same DB.
+    // A duplicate connection serializes reads against the watcher's auto-sync
+    // writes; on the wasm backend (no WAL) that surfaces as intermittent
+    // "database is locked" on concurrent tool calls. See issue #238. Deliberately
+    // not cached under projectPath — the server owns and closes the default
+    // instance, so routing it through projectCache.closeAll() would double-close it.
+    if (this.cg && this.cg.getProjectRoot() === resolvedRoot) {
+      return this.cg;
     }
 
     // Check if we already have this resolved root cached (different path, same project)
@@ -1321,16 +1331,21 @@ export class ToolHandler {
       `**Database size:** ${(stats.dbSizeBytes / 1024 / 1024).toFixed(2)} MB`,
     ];
 
-    // Surface the active SQLite backend. Without this, users on the
-    // silent WASM fallback (better-sqlite3 install failed) see "slow"
-    // indexing and DB-lock errors with no signal of why.
-    const backend = cg.getBackend();
-    if (backend === 'native') {
-      lines.push(`**Backend:** native (better-sqlite3)`);
+    // Surface the active SQLite backend (node:sqlite, Node's built-in real
+    // SQLite — full WAL + FTS5, no native build).
+    lines.push(`**Backend:** node:sqlite (Node built-in) — full WAL + FTS5`);
+
+    // Effective journal mode. 'wal' ⇒ concurrent reads never block on a writer;
+    // anything else ⇒ they can ("database is locked"). node:sqlite supports WAL
+    // everywhere, so a non-wal mode means the filesystem can't (network/
+    // virtualized mounts, WSL2 /mnt). See issue #238.
+    const journalMode = cg.getJournalMode();
+    if (journalMode === 'wal') {
+      lines.push(`**Journal mode:** wal (concurrent reads safe)`);
     } else {
       lines.push(
-        `**Backend:** ⚠ wasm (better-sqlite3 unavailable) — ` +
-        `5-10x slower than native. Fix: ${WASM_FALLBACK_FIX_RECIPE}`
+        `**Journal mode:** ⚠ ${journalMode || 'unknown'} — WAL not active, so reads ` +
+        `can block on a concurrent write (WAL appears unsupported on this filesystem)`
       );
     }
 

@@ -1,0 +1,72 @@
+name: Release
+
+# Manually triggered ("Run workflow"). On trigger it:
+#   1. reads the version from package.json,
+#   2. builds a self-contained bundle for every platform (one runner — there's no
+#      native compilation, so cross-packaging is fine),
+#   3. creates the GitHub Release (tag v<version>) with all archives, using the
+#      release notes from CHANGELOG.md,
+#   4. publishes the npm thin-installer (shim + per-platform packages).
+#
+# Before triggering: bump package.json and make sure CHANGELOG.md has the matching
+# section (## [<version>], or ## [Unreleased]). Set the NPM_TOKEN repo secret.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # create the GitHub Release + tag
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Ensure zip/unzip
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip
+
+      - name: Build all platform bundles
+        run: |
+          for t in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
+            bash scripts/build-bundle.sh "$t"
+          done
+          ls -lh release
+
+      - name: Resolve version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          node scripts/extract-release-notes.mjs "$V" > notes.md 2>/dev/null \
+            || node scripts/extract-release-notes.mjs Unreleased > notes.md 2>/dev/null || true
+          if [ ! -s notes.md ]; then
+            echo "::error::No release notes in CHANGELOG.md for [$V] or [Unreleased]."
+            exit 1
+          fi
+          echo "----- release notes -----"; cat notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.version }}" \
+            release/codegraph-* \
+            --title "v${{ steps.ver.outputs.version }}" \
+            --notes-file notes.md
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          bash scripts/pack-npm.sh "${{ steps.ver.outputs.version }}"
+          # Platform packages first, then the main shim (which depends on them).
+          for dir in release/npm/codegraph-* release/npm/main; do
+            echo "publishing $dir"
+            ( cd "$dir" && npm publish --access public )
+          done

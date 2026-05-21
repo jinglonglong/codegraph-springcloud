@@ -8,7 +8,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@colbymchenry/codegraph.svg)](https://www.npmjs.com/package/@colbymchenry/codegraph)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-20--24-green.svg)](https://nodejs.org/)
+[![Self-contained](https://img.shields.io/badge/Node.js-bundled%20%C2%B7%20none%20required-brightgreen.svg)](https://nodejs.org/)
 
 [![Windows](https://img.shields.io/badge/Windows-supported-blue.svg)](#)
 [![macOS](https://img.shields.io/badge/macOS-supported-blue.svg)](#)
@@ -23,11 +23,24 @@
 
 ### Get Started
 
+**No Node.js required** — one command grabs the right build for your OS:
+
 ```bash
-npx @colbymchenry/codegraph
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex
 ```
 
-<sub>Interactive installer auto-configures your agent(s) — Claude Code, Cursor, Codex CLI, opencode</sub>
+Already have Node? Use npm instead (works on any version):
+
+```bash
+npx @colbymchenry/codegraph        # zero-install, or:
+npm i -g @colbymchenry/codegraph
+```
+
+<sub>CodeGraph bundles its own runtime — nothing to compile, no native build, works the same everywhere.<br />The interactive installer auto-configures your agent(s) — Claude Code, Cursor, Codex CLI, opencode.</sub>
 
 #### Initialize Projects
 
@@ -456,10 +469,10 @@ The `.codegraph/config.json` file controls indexing:
 
 **Indexing is slow** — Check that `node_modules` and other large directories are excluded. Use `--quiet` to reduce output overhead.
 
-**Indexing is slow / MCP `database is locked` / WASM fallback active** — `codegraph` ships with a WASM SQLite fallback for environments where `better-sqlite3` (a native module, declared as `optionalDependencies`) can't install. The fallback is 5-10x slower than the native backend and uses a journal mode that lets writers block readers, so MCP queries can also hit `database is locked` while indexing runs. Run `codegraph status` and look at the `Backend:` line:
+**Indexing is slow, or MCP hits `database is locked`** — both trace to the SQLite backend. `codegraph` picks the best available, in order: native `better-sqlite3` (fastest; an `optionalDependencies` native module), then Node's built-in `node:sqlite` (Node ≥ 22.5), then a bundled WASM build. Run `codegraph status` and read the **`Backend:`** and **`Journal:`** lines:
 
-- `Backend: native` — you're on the fast path, nothing to do.
-- `Backend: wasm` — you're on the slow fallback. Common causes: missing C build tools, prebuilt binary unavailable for your Node version, or your Node version changed after install. Fix:
+- `Backend: native` or `node:sqlite` with `Journal: wal` — fast path with lock-free concurrent reads; nothing to do.
+- `Backend: wasm` — the native module didn't load *and* `node:sqlite` is unavailable (Node < 22.5). WASM is 5-10x slower and has no WAL, so heavy concurrent use can briefly hit `database is locked`. The simplest fix is Node ≥ 22.5 (you get `node:sqlite` automatically); otherwise restore the native backend:
 
   ```bash
   # macOS
@@ -479,6 +492,7 @@ The `.codegraph/config.json` file controls indexing:
   ```
 
   After the fix, `codegraph status` should show `Backend: native`.
+- `Journal:` shows anything other than `wal` on a `native` / `node:sqlite` backend — WAL couldn't be enabled on this filesystem (common on network shares and WSL2 `/mnt`), so reads can block on writes. Move the project (with its `.codegraph/` folder) onto a local disk.
 
 **MCP server not connecting** — Ensure the project is initialized/indexed, verify the path in your MCP config, and check that `codegraph serve --mcp` works from the command line.
 
