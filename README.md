@@ -19,9 +19,9 @@
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-supported-blueviolet.svg)](#)
 [![opencode](https://img.shields.io/badge/opencode-supported-blueviolet.svg)](#)
 
-<br />
+</div>
 
-### Get Started
+## Get Started
 
 **No Node.js required** — one command grabs the right build for your OS:
 
@@ -40,14 +40,16 @@ npx @colbymchenry/codegraph        # zero-install, or:
 npm i -g @colbymchenry/codegraph
 ```
 
-<sub>CodeGraph bundles its own runtime — nothing to compile, no native build, works the same everywhere.<br />The interactive installer auto-configures your agent(s) — Claude Code, Cursor, Codex CLI, opencode.</sub>
+<sub>CodeGraph bundles its own runtime — nothing to compile, no native build, works the same everywhere. The interactive installer auto-configures your agent(s) — Claude Code, Cursor, Codex CLI, opencode.</sub>
 
-#### Initialize Projects
+### Initialize Projects
 
 ```bash
 cd your-project
 codegraph init -i
 ```
+
+<div align="center">
 
 ![1_C_VYnhpys0UHrOuOgpgoyw](https://github.com/user-attachments/assets/f168182f-4d9a-44e0-94d7-08d018cc8a3a)
 
