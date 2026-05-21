@@ -55,18 +55,44 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ steps.ver.outputs.version }}" \
-            release/codegraph-* \
-            --title "v${{ steps.ver.outputs.version }}" \
-            --notes-file notes.md
+          TAG="v${{ steps.ver.outputs.version }}"
+          # Idempotent: create the release once, otherwise (re-run) refresh assets.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/codegraph-* --clobber
+          else
+            gh release create "$TAG" release/codegraph-* --title "$TAG" --notes-file notes.md
+          fi
 
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          bash scripts/pack-npm.sh "${{ steps.ver.outputs.version }}"
+          V="${{ steps.ver.outputs.version }}"
+          bash scripts/pack-npm.sh "$V"
           # Platform packages first, then the main shim (which depends on them).
+          # Skip any already on the registry so a re-run only fills in gaps.
           for dir in release/npm/codegraph-* release/npm/main; do
-            echo "publishing $dir"
-            ( cd "$dir" && npm publish --access public )
+            name=$(node -p "require('./$dir/package.json').name")
+            if npm view "$name@$V" version >/dev/null 2>&1; then
+              echo "skip $name@$V (already published)"
+            else
+              echo "publishing $name@$V"
+              ( cd "$dir" && npm publish --access public )
+            fi
+          done
+
+      - name: Verify every package is actually on the registry
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          # npm publish can print success without persisting; confirm against the
+          # registry (with retries for propagation) so green means really shipped.
+          for dir in release/npm/codegraph-* release/npm/main; do
+            name=$(node -p "require('./$dir/package.json').name")
+            ok=
+            for i in 1 2 3 4 5 6; do
+              if npm view "$name@$V" version >/dev/null 2>&1; then ok=1; break; fi
+              echo "waiting for $name@$V to appear ($i)…"; sleep 10
+            done
+            [ -n "$ok" ] || { echo "::error::$name@$V never appeared on the registry"; exit 1; }
+            echo "verified $name@$V"
           done
