@@ -85,6 +85,8 @@ export const LANGUAGES = [
   'liquid',
   'pascal',
   'scala',
+  'lua',
+  'luau',
   'unknown',
 ] as const;
 
@@ -545,6 +547,10 @@ export const DEFAULT_CONFIG: CodeGraphConfig = {
     // Scala
     '**/*.scala',
     '**/*.sc',
+    // Lua
+    '**/*.lua',
+    // Luau
+    '**/*.luau',
   ],
   exclude: [
     // Version control

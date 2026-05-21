@@ -7,6 +7,20 @@ a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Lua**: CodeGraph now indexes Lua (`.lua`) — functions, methods (table `t.f`
+  and `t:m` definitions become methods with a `t::f` receiver-qualified name),
+  local variables, `require(...)` imports, and the call edges between them.
+  Querying a Lua project (Neovim plugins, Kong, OpenResty, game code) now
+  surfaces its modules, methods, and call graph.
+- **Luau** ([#232](https://github.com/colbymchenry/codegraph/issues/232)):
+  CodeGraph now indexes Luau (`.luau`), Roblox's typed superset of Lua —
+  everything Lua extracts, plus `type` / `export type` aliases, typed function
+  signatures, generics, and Roblox instance-path `require(script.Parent.X)`
+  imports.
+
 ## [0.8.0] - 2026-05-20
 
 ### Added
