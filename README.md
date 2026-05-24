@@ -76,26 +76,26 @@ When Claude Code explores a codebase, it spawns **Explore agents** that scan fil
 
 ### Benchmark Results
 
-Tested across **7 real-world open-source codebases** spanning 7 languages, comparing an agent (Claude Code, headless) answering one architecture question **with** and **without** CodeGraph. Each cell is the savings at the **median of 4 runs per arm**.
+Tested across **7 real-world open-source codebases** spanning 7 languages, comparing an agent (Claude Code, headless) answering one architecture question **with** and **without** CodeGraph. Each cell is the savings at the **median of 4 runs per arm**. _Re-validated on **v0.9.4** (2026-05-24)._
 
-> **Average: 35% cheaper · 59% fewer tokens · 49% faster · 70% fewer tool calls**
+> **Average: 35% cheaper · 57% fewer tokens · 46% faster · 71% fewer tool calls**
 
 | Codebase | Language | Cost | Tokens | Time | Tool calls |
 |----------|----------|------|--------|------|------------|
-| **VS Code** | TypeScript · ~10k files | 35% cheaper | 73% fewer | 41% faster | 72% fewer |
-| **Excalidraw** | TypeScript · ~600 | 47% cheaper | 73% fewer | 60% faster | 86% fewer |
-| **Django** | Python · ~2.7k | 34% cheaper | 64% fewer | 59% faster | 81% fewer |
-| **Tokio** | Rust · ~700 | 52% cheaper | 81% fewer | 63% faster | 89% fewer |
-| **OkHttp** | Java · ~640 | 17% cheaper | 41% fewer | 36% faster | 64% fewer |
-| **Gin** | Go · ~150 | 22% cheaper | 23% fewer | 34% faster | 19% fewer |
-| **Alamofire** | Swift · ~100 | 38% cheaper | 59% fewer | 51% faster | 77% fewer |
+| **VS Code** | TypeScript · ~10k files | 26% cheaper | 78% fewer | 52% faster | 85% fewer |
+| **Excalidraw** | TypeScript · ~640 | 52% cheaper | 90% fewer | 73% faster | 96% fewer |
+| **Django** | Python · ~3k | 12% cheaper | 36% fewer | 19% faster | 53% fewer |
+| **Tokio** | Rust · ~790 | 82% cheaper | 86% fewer | 71% faster | 92% fewer |
+| **OkHttp** | Java · ~645 | 2% cheaper | 13% fewer | 31% faster | 45% fewer |
+| **Gin** | Go · ~110 | 21% cheaper | 34% fewer | 27% faster | 40% fewer |
+| **Alamofire** | Swift · ~110 | 47% cheaper | 64% fewer | 48% faster | 83% fewer |
 
 The gains scale with codebase size: on large repos the agent answers from the index in a handful of calls with **zero file reads**, while the no-CodeGraph agent fans out across grep/find/Read (and the sub-agents it spawns). On a small repo like Gin (~150 files) native search is already cheap, so the margin narrows.
 
 <details>
 <summary><strong>Full benchmark details</strong></summary>
 
-**Methodology.** Each arm is `claude -p` (Claude Opus 4.7, Claude Code v2.1.145) run headlessly against the repo with `--strict-mcp-config`: **WITH** = CodeGraph's MCP server enabled, **WITHOUT** = an empty MCP config. Built-in Read/Grep/Bash stay available to both. Same question per repo, **4 runs per arm, median reported**. Cost = the run's `total_cost_usd`; Tokens = total tokens processed (input incl. cached + output); Time = wall-clock; Tool calls = every tool invocation, including those inside any sub-agents the model spawns. Repos cloned at `--depth 1` and indexed by the same CodeGraph build that served them.
+**Methodology.** Each arm is `claude -p` (Claude Opus 4.7) run headlessly against the repo with `--strict-mcp-config`: **WITH** = CodeGraph's MCP server enabled, **WITHOUT** = an empty MCP config. Built-in Read/Grep/Bash stay available to both. Same question per repo, **4 runs per arm, median reported**. Cost = the run's `total_cost_usd`; Tokens = total tokens processed (input incl. cached + output); Time = wall-clock; Tool calls = every tool invocation, including those inside any sub-agents the model spawns. Repos cloned at `--depth 1` and indexed by the same CodeGraph build that served them. Re-validated on codegraph **v0.9.4** (2026-05-24); per-repo numbers move run-to-run with how hard the without-arm thrashes (the median-of-4 smooths it, but tails remain — e.g. Tokio's without-arm hit $2.41/3m one batch).
 
 **Queries:**
 | Codebase | Query |
@@ -111,13 +111,13 @@ The gains scale with codebase size: on large repos the agent answers from the in
 **Raw medians — WITH → WITHOUT:**
 | Codebase | Cost | Tokens | Time | Tool calls |
 |----------|------|--------|------|------------|
-| VS Code | $0.42 → $0.64 | 393k → 1.4M | 1m 0s → 1m 43s | 7 → 23 |
-| Excalidraw | $0.54 → $1.02 | 851k → 3.2M | 1m 17s → 3m 14s | 12 → 83 |
-| Django | $0.41 → $0.62 | 499k → 1.4M | 1m 0s → 2m 25s | 9 → 48 |
-| Tokio | $0.50 → $1.04 | 657k → 3.4M | 1m 5s → 2m 56s | 9 → 75 |
-| OkHttp | $0.36 → $0.44 | 352k → 596k | 45s → 1m 11s | 5 → 14 |
-| Gin | $0.36 → $0.46 | 431k → 562k | 47s → 1m 11s | 7 → 8 |
-| Alamofire | $0.61 → $0.99 | 1.1M → 2.6M | 1m 19s → 2m 41s | 15 → 64 |
+| VS Code | $0.60 → $0.80 | 601k → 2.8M | 1m 10s → 2m 26s | 8 → 55 |
+| Excalidraw | $0.43 → $0.90 | 344k → 3.5M | 48s → 2m 58s | 3 → 79 |
+| Django | $0.59 → $0.67 | 739k → 1.2M | 1m 19s → 1m 38s | 9 → 19 |
+| Tokio | $0.42 → $2.41 | 379k → 2.6M | 53s → 3m 2s | 4 → 53 |
+| OkHttp | $0.47 → $0.47 | 636k → 730k | 42s → 1m 1s | 6 → 11 |
+| Gin | $0.37 → $0.47 | 444k → 675k | 44s → 1m 0s | 6 → 10 |
+| Alamofire | $0.61 → $1.14 | 1.0M → 2.8M | 1m 17s → 2m 27s | 12 → 69 |
 
 **Why CodeGraph wins:** with the index available, the agent answers directly — `codegraph_context` to map the area, then one `codegraph_explore` for the relevant source — and stops, usually with zero file reads. Without it, the agent (and the Explore sub-agents it spawns) spends most of its budget on discovery (find/ls/grep) before reading the right code. CodeGraph only helps when queried *directly*, so its instructions steer agents to answer directly rather than delegate exploration to file-reading sub-agents — otherwise a sub-agent reads files regardless and CodeGraph becomes overhead.
 
@@ -397,6 +397,7 @@ When running as an MCP server, CodeGraph exposes these tools to Claude Code:
 |------|---------|
 | `codegraph_search` | Find symbols by name across the codebase |
 | `codegraph_context` | Build relevant code context for a task |
+| `codegraph_trace` | Trace the call path between two symbols ("how does X reach Y") in one call — each hop with its body inline, following dynamic-dispatch hops (callbacks, React re-render, interface→impl) that grep can't |
 | `codegraph_callers` | Find what calls a function |
 | `codegraph_callees` | Find what a function calls |
 | `codegraph_impact` | Analyze what code is affected by changing a symbol |
