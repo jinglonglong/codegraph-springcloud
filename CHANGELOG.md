@@ -7,6 +7,33 @@ a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Shared MCP daemon — running multiple AI agents in the same project no
+  longer multiplies the file-watch, SQLite, and indexing cost.** Point more
+  than one `codegraph serve --mcp` at a project (two Claude Code windows, an
+  agent in a git worktree, `/loop` alongside an interactive session, parallel
+  sub-agents) and they now share **one** background daemon per project: a
+  single file watcher (one inotify set on Linux), one SQLite connection, and
+  one tree-sitter warm-up — instead of N independent copies. Measured on Linux:
+  three agents register **~3× fewer inotify watches** sharing one watcher
+  versus three standalone servers. Resolves issue #411. (Composable with the
+  per-watcher pruning in #276/#346 — that shrinks each watch set; this shares
+  one across agents.)
+- The daemon runs as a **detached background process** that outlives any single
+  session, so closing one editor or terminal never severs the others. Each
+  `serve --mcp` your agent host launches is a thin stdio↔socket proxy to it (a
+  Unix-domain socket, or a named pipe on Windows). When the last client
+  disconnects the daemon lingers for `CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS`
+  (default `300000`) so back-to-back sessions skip the startup cost, then exits
+  and removes its lockfile — an OOM-killed or force-quit host can't leak it.
+- **`CODEGRAPH_NO_DAEMON=1`** opts out, restoring one independent server per
+  client (handy for debugging or sandboxes that disallow local IPC sockets).
+  The daemon is also version-pinned: after you upgrade codegraph, sessions
+  already attached to the old daemon keep using it while new sessions run
+  standalone until it idles out — they never mix versions over the socket.
+
 ## [0.9.5] - 2026-05-25
 
 ### Fixed
