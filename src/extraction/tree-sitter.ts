@@ -1504,10 +1504,11 @@ export class TreeSitterExtractor {
       const func = getChildByField(node, 'function') || node.namedChild(0);
 
       if (func) {
-        if (func.type === 'member_expression' || func.type === 'attribute' || func.type === 'selector_expression' || func.type === 'navigation_expression') {
+        if (func.type === 'member_expression' || func.type === 'attribute' || func.type === 'selector_expression' || func.type === 'navigation_expression' || func.type === 'field_expression') {
           // Method call: obj.method() or obj.field.method()
           // Go uses selector_expression with 'field', JS/TS uses member_expression with 'property'
           // Kotlin uses navigation_expression with navigation_suffix > simple_identifier
+          // C/C++ use field_expression for both `obj.method()` and `ptr->method()`
           let property = getChildByField(func, 'property') || getChildByField(func, 'field');
           if (!property) {
             const child1 = func.namedChild(1);
@@ -1524,9 +1525,13 @@ export class TreeSitterExtractor {
             // This helps the resolver distinguish method calls from bare function calls
             // (e.g., Python's console.print() vs builtin print())
             // Skip self/this/cls as they don't aid resolution
-            const receiver = getChildByField(func, 'object') || getChildByField(func, 'operand') || func.namedChild(0);
+            const receiver =
+              getChildByField(func, 'object') ||
+              getChildByField(func, 'operand') ||
+              getChildByField(func, 'argument') ||
+              func.namedChild(0);
             const SKIP_RECEIVERS = new Set(['self', 'this', 'cls', 'super']);
-            if (receiver && (receiver.type === 'identifier' || receiver.type === 'simple_identifier')) {
+            if (receiver && (receiver.type === 'identifier' || receiver.type === 'simple_identifier' || receiver.type === 'field_identifier')) {
               const receiverName = getNodeText(receiver, this.source);
               if (!SKIP_RECEIVERS.has(receiverName)) {
                 calleeName = `${receiverName}.${methodName}`;
