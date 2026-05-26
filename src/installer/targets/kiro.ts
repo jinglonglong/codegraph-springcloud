@@ -79,7 +79,15 @@ class KiroTarget implements AgentTarget {
     files.push(writeSteeringEntry(loc));
     return {
       files,
-      notes: ['Restart Kiro for MCP changes to take effect.'],
+      // The IDE-only enable-MCP step is load-bearing: Kiro IDE ships
+      // with MCP support disabled by default, so even a valid
+      // `~/.kiro/settings/mcp.json` at the documented path is ignored
+      // until the user flips the toggle. Kiro CLI reads the same file
+      // without a gate, so we call out which audience this applies to.
+      notes: [
+        'Restart Kiro for MCP changes to take effect.',
+        'Kiro IDE: also enable MCP in Settings (search "MCP" → "Enabled"). Kiro CLI users can skip this step.',
+      ],
     };
   }
 
