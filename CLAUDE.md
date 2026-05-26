@@ -204,34 +204,44 @@ Released to npm and mirrored as [GitHub Releases](https://github.com/colbymchenr
 
 ### Writing changelog entries
 
-When asked for an entry for a new version:
+**Default: write entries under `## [Unreleased]`** — that's the section reserved for work landing between releases. **Don't pre-create a `## [X.Y.Z]` block** for the next release: the Release workflow's first step is `scripts/prepare-release.mjs`, which automatically promotes everything under `[Unreleased]` into a new `## [X.Y.Z] - <YYYY-MM-DD>` block at release time (or merges into a pre-existing `[X.Y.Z]` block if one exists — but you don't need one). Pre-staging is what caused the v0.9.5 sparse-release-notes incident: a sparse `[0.9.5]` block hand-added before the rest of the work landed got picked by the extractor over the much-larger `[Unreleased]` section above it. Don't do that.
 
-1. Add a new `## [X.Y.Z] - YYYY-MM-DD` block at the **top** of `CHANGELOG.md` (under the intro, above the previous version).
-2. Group under `### Added`, `### Changed`, `### Fixed`, `### Removed`, `### Deprecated`, `### Security` — omit empty sections.
-3. Write from the **user's perspective**, not the implementation's. Lead with the observable symptom or capability; mention internals only if a user needs them (e.g., to work around an existing bad install).
-4. Add the link reference at the bottom: `[X.Y.Z]: https://github.com/colbymchenry/codegraph/releases/tag/vX.Y.Z`.
+Formatting rules for any entry (anywhere — `[Unreleased]` or otherwise):
+
+1. Group under `### Added`, `### Changed`, `### Fixed`, `### Removed`, `### Deprecated`, `### Security` — omit empty sections. The promote step merges matching sub-section headings, so writing under `### Added` in `[Unreleased]` lands under `### Added` in `[X.Y.Z]`.
+2. Write from the **user's perspective**, not the implementation's. Lead with the observable symptom or capability; mention internals only if a user needs them (e.g., to work around an existing bad install).
+3. Issue / PR references in entries are by number (`(#403)` etc.); the GitHub renderer auto-links them in the published release notes.
+4. **Don't add a `[X.Y.Z]: https://...` link reference yourself** — `prepare-release.mjs` appends it automatically when it promotes the version (idempotent: a re-run is a no-op if it already exists).
 
 ### Release flow (the user runs these)
 
 Releases are built and published by the **GitHub Actions "Release" workflow**
-(`.github/workflows/release.yml`). It bundles a Node runtime per platform
-(`scripts/build-bundle.sh`) and publishes both the GitHub Release and the npm
-thin-installer (`scripts/pack-npm.sh`: a shim package + per-platform packages).
+(`.github/workflows/release.yml`). It runs `scripts/prepare-release.mjs` to
+promote `[Unreleased]` into `[<version>]` (and auto-commit + push that
+CHANGELOG change back to `main` so on-disk truth matches the published
+notes), then bundles a Node runtime per platform (`scripts/build-bundle.sh`)
+and publishes both the GitHub Release and the npm thin-installer
+(`scripts/pack-npm.sh`: a shim package + per-platform packages).
 Publishing manually is **wrong** now — a plain `npm publish` ships the root
 package (non-bundled), which breaks anyone on Node < 22.5.
 
-After the changelog entry is written and `package.json` is bumped:
+The release cut itself is:
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md
-git commit -m "release: X.Y.Z (<one-line summary>)"
+# CHANGELOG already has entries under [Unreleased] — no manual moves needed.
+# Just bump the version:
+npm version --no-git-tag-version <X.Y.Z>      # or edit package.json manually
+git add package.json package-lock.json
+git commit -m "release: X.Y.Z"
 git push
 ```
 
-Then trigger **Actions → Release → Run workflow** (on `main`). It reads the
-version from `package.json`, builds every platform bundle on one runner, creates
-the GitHub Release with notes from the matching `CHANGELOG.md` section, and
-publishes to npm. Requires the `NPM_TOKEN` repo secret.
+Then trigger **Actions → Release → Run workflow** (on `main`). The workflow:
+
+1. Runs `prepare-release.mjs <X.Y.Z>` → promotes `[Unreleased]` → `[X.Y.Z] - <today>` in `CHANGELOG.md`, appends the link reference, commits + pushes the move with `[skip ci]`.
+2. Builds every platform bundle on one runner, generates `SHA256SUMS`.
+3. Creates the GitHub Release with notes from the freshly-promoted `[X.Y.Z]` block.
+4. Publishes the npm shim + per-platform packages. Requires the `NPM_TOKEN` repo secret.
 
 **Do not run `npm publish`, `git push`, or `git tag` yourself** — these are
 publish actions on shared state. Write the files, hand the user the commands.

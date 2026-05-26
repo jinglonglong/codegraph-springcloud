@@ -195,7 +195,8 @@ function main() {
       body: ['', ''], // two blank lines for the next round of entries
     };
     parsed.blocks.splice(unrelIdx, 1, emptied, promoted);
-    writeFileSync(CHANGELOG_PATH, joinChangelog(parsed));
+    const next = joinChangelog(parsed);
+    writeFileSync(CHANGELOG_PATH, appendLinkRef(next, version));
     console.log(`prepare-release: ${version} — renamed [Unreleased] to [${version}] - ${today}`);
     return;
   }
@@ -234,8 +235,31 @@ function main() {
   // Empty out Unreleased.
   unrel.body = ['', ''];
 
-  writeFileSync(CHANGELOG_PATH, joinChangelog(parsed));
+  const merged_text = joinChangelog(parsed);
+  writeFileSync(CHANGELOG_PATH, appendLinkRef(merged_text, version));
   console.log(`prepare-release: ${version} — merged ${merged} Unreleased entries into existing [${version}] block`);
+}
+
+/**
+ * Append a `[X.Y.Z]: https://github.com/colbymchenry/codegraph/releases/tag/vX.Y.Z`
+ * link reference at the end of the file IF one doesn't already exist. The
+ * link ref is what makes `## [X.Y.Z]` heading text auto-link to its tag in
+ * GitHub's renderer; without it the heading still renders, just unlinked.
+ *
+ * Idempotent. The existing CHANGELOG mixes link refs scattered through the
+ * file and a sorted block at the bottom — we just append at the very end,
+ * which CommonMark accepts regardless.
+ */
+function appendLinkRef(text, version) {
+  const refLine = `[${version}]: https://github.com/colbymchenry/codegraph/releases/tag/v${version}`;
+  // Already there? Look for a line that EQUALS this (anywhere in the file)
+  // to keep idempotency robust against the scattered-vs-block layout.
+  const lines = text.split('\n');
+  if (lines.some((l) => l.trim() === refLine)) return text;
+  // Append, separated by a blank line from the prior content. Preserve a
+  // single trailing newline at EOF.
+  const trailingNewline = text.endsWith('\n') ? '' : '\n';
+  return text + trailingNewline + refLine + '\n';
 }
 
 try {

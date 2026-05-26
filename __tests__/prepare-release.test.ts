@@ -165,6 +165,40 @@ describe('prepare-release.mjs', () => {
     });
   });
 
+  describe('link reference', () => {
+    it('appends a `[version]: https://...` link reference at EOF when promoting (Case A)', () => {
+      dir = setup(HEADER + `## [Unreleased]\n\n### Added\n- x\n\n## [1.2.2] - 2026-01-01\n`);
+      run(dir);
+      const result = fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');
+      expect(result).toContain(
+        '[1.2.3]: https://github.com/colbymchenry/codegraph/releases/tag/v1.2.3',
+      );
+    });
+
+    it('appends a link reference when merging into an existing [version] (Case B)', () => {
+      dir = setup(
+        HEADER + `## [Unreleased]\n\n### Added\n- new\n\n## [1.2.3] - 2026-02-02\n\n### Fixed\n- prior\n`,
+      );
+      run(dir);
+      const result = fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');
+      expect(result).toContain(
+        '[1.2.3]: https://github.com/colbymchenry/codegraph/releases/tag/v1.2.3',
+      );
+    });
+
+    it('does not double-add an existing link reference', () => {
+      const ref = '[1.2.3]: https://github.com/colbymchenry/codegraph/releases/tag/v1.2.3';
+      dir = setup(
+        HEADER +
+          `## [Unreleased]\n\n### Added\n- x\n\n## [1.2.2] - 2026-01-01\n\n${ref}\n`,
+      );
+      run(dir);
+      const result = fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');
+      const occurrences = result.split(ref).length - 1;
+      expect(occurrences).toBe(1);
+    });
+  });
+
   describe('extractor integration', () => {
     it('the resulting [version] block is what extract-release-notes.mjs would surface', () => {
       // Run prepare, then extract — confirm the output contains all the
