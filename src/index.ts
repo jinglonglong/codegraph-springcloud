@@ -327,6 +327,17 @@ export class CodeGraph {
       try {
         const result = await this.orchestrator.indexAll(options.onProgress, options.signal, options.verbose);
 
+        // Re-detect frameworks now that the index is populated. The resolver
+        // is constructed with createResolver() before any files exist, so
+        // framework resolvers whose detect() consults the indexed file list
+        // (e.g. UIKit/SwiftUI scanning for imports, swift-objc-bridge looking
+        // for both Swift and ObjC files) all return false on that initial pass
+        // and silently drop themselves. Re-initializing here gives them a
+        // chance to see the actual project before resolution runs.
+        if (result.success && result.filesIndexed > 0) {
+          this.resolver.initialize();
+        }
+
         // Resolve references to create call/import/extends edges
         if (result.success && result.filesIndexed > 0) {
           // Get count without loading all refs into memory

@@ -555,6 +555,24 @@ export class ExtractionOrchestrator {
           return null;
         }
       },
+      // Monorepo support — needed by framework detect()s that probe
+      // subpackage manifests (e.g. fabric-view looking at
+      // packages/<sub>/package.json when the root manifest is just a
+      // workspace declaration). Matches the resolver-context shape.
+      listDirectories: (relativePath: string) => {
+        const target =
+          relativePath === '.' || relativePath === ''
+            ? rootDir
+            : path.join(rootDir, relativePath);
+        try {
+          return fs
+            .readdirSync(target, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name);
+        } catch {
+          return [];
+        }
+      },
     };
   }
 

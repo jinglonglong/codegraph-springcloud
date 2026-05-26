@@ -1467,9 +1467,26 @@ export class TreeSitterExtractor {
         }
       }
     } else if (node.type === 'message_expression') {
-      const methodField = getChildByField(node, 'method');
-      if (methodField) {
-        const methodName = getNodeText(methodField, this.source);
+      // ObjC message expressions emit one `method` field child per selector
+      // keyword: `[obj a:1 b:2 c:3]` has three `method=identifier` siblings.
+      // Joining them with `:` reconstructs the full selector and matches the
+      // multi-part selector names produced by the ObjC method_definition
+      // extractor (`extractObjcMethodName` in languages/objc.ts). Without this
+      // join, multi-keyword call sites only emitted the first keyword and never
+      // resolved to their target methods (e.g. `GET:parameters:headers:...` had
+      // zero callers despite obviously being called).
+      const methodKeywords: string[] = [];
+      for (let i = 0; i < node.namedChildCount; i++) {
+        if (node.fieldNameForNamedChild(i) === 'method') {
+          const kw = node.namedChild(i);
+          if (kw) methodKeywords.push(getNodeText(kw, this.source));
+        }
+      }
+      if (methodKeywords.length > 0) {
+        const methodName: string =
+          methodKeywords.length === 1
+            ? (methodKeywords[0] as string)
+            : methodKeywords.map((k) => `${k}:`).join('');
         const receiverField = getChildByField(node, 'receiver');
         const SKIP_RECEIVERS = new Set(['self', 'super']);
         if (receiverField && receiverField.type !== 'message_expression') {

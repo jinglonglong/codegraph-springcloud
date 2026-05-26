@@ -3987,6 +3987,35 @@ void helperFunction(int count) {
     expect(calls).toEqual(expect.arrayContaining(['NSLog', 'doWork', 'MyClass.shared', 'obj.greet']));
   });
 
+  it('should reconstruct multi-keyword selectors at the call site so they resolve to the method definition', () => {
+    // Regression for the gap discovered post-#165: message_expression's
+    // multi-keyword form `[obj a:1 b:2]` was only emitting the first keyword,
+    // so calls never resolved to multi-part method definitions like
+    // `GET:parameters:headers:progress:success:failure:`. The call-site name
+    // must match the method-definition name with full keywords + trailing colons.
+    const code = `
+@implementation Caller
+- (void)demo {
+    NSMutableDictionary *d = [NSMutableDictionary new];
+    [d setObject:@"v" forKey:@"k"];
+    [d setObject:@"v2" forKey:@"k2" withRetry:@YES];
+    [self touchesBegan:nil withEvent:nil];
+}
+@end
+`;
+    const result = extractFromSource('Caller.m', code);
+    const calls = result.unresolvedReferences
+      .filter((r) => r.referenceKind === 'calls')
+      .map((r) => r.referenceName);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        'd.setObject:forKey:',
+        'd.setObject:forKey:withRetry:',
+        'touchesBegan:withEvent:',
+      ])
+    );
+  });
+
   it('should not classify pure C headers with @end in comments as objc', () => {
     const cHeader = '/* @end of file */\n#ifndef STDIO_H\nvoid printf(const char *);\n#endif\n';
     expect(detectLanguage('stdio.h', cHeader)).toBe('c');
