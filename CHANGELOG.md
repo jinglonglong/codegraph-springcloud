@@ -9,6 +9,16 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Installer targets for Gemini CLI and the Antigravity IDE.** `codegraph install` (and the interactive prompt) now detect and configure two more agents out of the box:
+  - **Gemini CLI** (also covers the rebranded Antigravity CLI) — writes `mcpServers.codegraph` to `~/.gemini/settings.json` (global) or `./.gemini/settings.json` (local), and the codegraph usage block into `~/.gemini/GEMINI.md` / `./GEMINI.md`. Existing top-level settings (e.g. `security.auth`) and sibling MCP servers are preserved.
+  - **Antigravity IDE** — writes `mcpServers.codegraph` to Antigravity's unified MCP config at `~/.gemini/config/mcp_config.json` (post-migration, signalled by the `.migrated` marker Antigravity itself drops). Falls back to the legacy `~/.gemini/antigravity/mcp_config.json` for users on a pre-migration Antigravity build. On install, a stale codegraph entry in the legacy path is migrated to the new file automatically. Uninstall sweeps both. Antigravity-managed sibling fields (e.g. the `"disabled": true` flag the IDE adds when a user disables a server through the UI) are preserved across re-installs.
+  - The Antigravity entry omits the `type: "stdio"` field the other targets use — Antigravity rejects entries that carry it.
+  - On macOS, the Antigravity entry resolves `codegraph` to its absolute path at install time (e.g. an nvm-managed `~/.nvm/.../bin/codegraph`). macOS GUI apps launched from Dock/Finder get a stripped PATH that doesn't include nvm, so a bare command name fails to spawn — even when `which codegraph` works in your shell. Linux GUI apps inherit user PATH and Windows uses env `PATH` directly, so both keep the bare command.
+  - The IDE shares `GEMINI.md` with Gemini CLI, so the two targets compose naturally when both are installed; the antigravity target deliberately doesn't touch `GEMINI.md` so uninstalling Antigravity alone leaves CLI instructions intact.
+
+  Both targets are tested on the same parameterized contract as the existing five agents (idempotent install, sibling preservation, install/uninstall round-trip), with extra coverage for migration-marker detection, legacy → unified entry migration, sibling `disabled` field preservation, and the cross-target case where Gemini CLI and Antigravity IDE coexist in the same `~/.gemini/`. Closes #399.
+
 ## [0.9.5] - 2026-05-25
 
 ### Added
