@@ -9,6 +9,8 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-05-25
+
 ### Added
 - **Shared MCP daemon — running multiple AI agents in the same project no
   longer multiplies the file-watch, SQLite, and indexing cost.** Point more
@@ -196,10 +198,6 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   watch count drops from ~1,200 to ~14, even when the project has no
   `.gitignore`. (Stacks with the shared daemon from #411: one watcher across
   agents, and now that watcher is small.)
-
-## [0.9.5] - 2026-05-25
-
-### Fixed
 - **The index now stays in sync after `git pull`, branch switches, and edits made
   outside your editor.** Incremental sync detected changes via `git status`, which
   only sees *uncommitted* edits — so code pulled or checked out (which leaves a
