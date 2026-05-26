@@ -9,9 +9,21 @@
  *
  * No auto-flush, no static wait — the response is instant and the agent
  * decides whether to Read the specific stale file. These tests exercise
- * the full real path: real watcher + real CodeGraph index + real
- * ToolHandler.execute().
+ * the full real path: real CodeGraph index + real ToolHandler.execute().
+ *
+ * **chokidar is mocked** (see __helpers__/chokidar-mock.ts): the real
+ * FSEvents/inotify event delivery is non-deterministic under parallel
+ * vitest execution and produced a consistent ~30% failure rate on these
+ * tests when run inside the full suite. The mock replaces chokidar with
+ * a controllable EventEmitter so the tests synthesize file events
+ * deterministically via `triggerFileEvent(...)` instead of waiting on
+ * the OS-level watcher to deliver. The watcher's actual debounce timer
+ * (real setTimeout) is left untouched.
  */
+
+import { vi } from 'vitest';
+// Hoisted: chokidar is replaced by the controllable mock for this file.
+vi.mock('chokidar', async () => (await import('./__helpers__/chokidar-mock')).chokidarMockModule);
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -19,8 +31,9 @@ import * as path from 'path';
 import * as os from 'os';
 import CodeGraph from '../src/index';
 import { ToolHandler } from '../src/mcp/tools';
+import { triggerFileEvent } from './__helpers__/chokidar-mock';
 
-function waitFor(condition: () => boolean, timeoutMs = 5000, intervalMs = 50): Promise<void> {
+function waitFor(condition: () => boolean, timeoutMs = 2000, intervalMs = 25): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const tick = () => {
@@ -73,11 +86,19 @@ describe('MCP staleness banner', () => {
     cg.watch({ debounceMs: 4000 });
     await cg.waitUntilWatcherReady();
 
+    // Real disk write so a later sync (if it fires) sees the new content,
+    // plus a synthesized chokidar event so the watcher's pendingFiles set
+    // updates immediately without waiting on OS-level event delivery.
     fs.writeFileSync(
       path.join(testDir, 'src', 'alpha-only.ts'),
       'export function alphaOnly() { return 99; }\n',
     );
-    await waitFor(() => cg.getPendingFiles().some((p) => p.path === 'src/alpha-only.ts'), 8000);
+    triggerFileEvent(testDir, 'change', 'src/alpha-only.ts');
+
+    // With mocked chokidar this is synchronous — keep the wait just to
+    // exercise the realistic shape (the watcher's `chokidarReady` gate
+    // and the small window before the pending-file Map is populated).
+    await waitFor(() => cg.getPendingFiles().some((p) => p.path === 'src/alpha-only.ts'));
 
     const res = await handler.execute('codegraph_search', { query: 'alphaOnly' });
     expect(res.isError).toBeFalsy();
@@ -103,7 +124,8 @@ describe('MCP staleness banner', () => {
       path.join(testDir, 'src', 'bravo-only.ts'),
       'export function bravoOnly() { return 22; }\n',
     );
-    await waitFor(() => cg.getPendingFiles().some((p) => p.path === 'src/bravo-only.ts'), 8000);
+    triggerFileEvent(testDir, 'change', 'src/bravo-only.ts');
+    await waitFor(() => cg.getPendingFiles().some((p) => p.path === 'src/bravo-only.ts'));
 
     const res = await handler.execute('codegraph_search', { query: 'alphaOnly' });
     const text = res.content[0].text;
@@ -121,7 +143,9 @@ describe('MCP staleness banner', () => {
       path.join(testDir, 'src', 'alpha-only.ts'),
       'export function alphaOnly() { return 7; }\n',
     );
-    await waitFor(() => cg.getPendingFiles().length === 0, 5000);
+    triggerFileEvent(testDir, 'change', 'src/alpha-only.ts');
+    // Wait through debounce (200ms) + sync; pendingFiles drains back to empty.
+    await waitFor(() => cg.getPendingFiles().length === 0, 3000);
 
     const res = await handler.execute('codegraph_search', { query: 'alphaOnly' });
     const text = res.content[0].text;
@@ -137,7 +161,8 @@ describe('MCP staleness banner', () => {
       path.join(testDir, 'src', 'charlie-only.ts'),
       'export function charlieOnly() { return 33; }\n',
     );
-    await waitFor(() => cg.getPendingFiles().some((p) => p.path === 'src/charlie-only.ts'), 8000);
+    triggerFileEvent(testDir, 'change', 'src/charlie-only.ts');
+    await waitFor(() => cg.getPendingFiles().some((p) => p.path === 'src/charlie-only.ts'));
 
     const res = await handler.execute('codegraph_status', {});
     const text = res.content[0].text;
