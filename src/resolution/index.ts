@@ -608,6 +608,28 @@ export class ReferenceResolver {
   }
 
   /**
+   * Defense-in-depth: drop edges whose source or target is no longer in
+   * the nodes table. PR #62 (issue #42) applied this filter at the
+   * extraction-layer `insertEdges` site; #455 reports the same
+   * `FOREIGN KEY constraint failed` reappearing here at the
+   * resolution-layer site during watch sync, where a resolver lookup that
+   * crosses a framework-specific cache can hand us a target whose node
+   * was removed by a concurrent file rewrite. One batched, cache-aware
+   * `getNodesByIds` query is enough to skip those edges quietly instead
+   * of aborting the whole sync.
+   */
+  private filterEdgesByExistingNodes(edges: Edge[]): Edge[] {
+    if (edges.length === 0) return edges;
+    const allIds = new Set<string>();
+    for (const e of edges) {
+      allIds.add(e.source);
+      allIds.add(e.target);
+    }
+    const existing = this.queries.getNodesByIds([...allIds]);
+    return edges.filter((e) => existing.has(e.source) && existing.has(e.target));
+  }
+
+  /**
    * Resolve and persist edges to database
    */
   resolveAndPersist(
@@ -620,8 +642,9 @@ export class ReferenceResolver {
     const edges = this.createEdges(result.resolved);
 
     // Insert edges into database
-    if (edges.length > 0) {
-      this.queries.insertEdges(edges);
+    const validEdges = this.filterEdgesByExistingNodes(edges);
+    if (validEdges.length > 0) {
+      this.queries.insertEdges(validEdges);
     }
 
     // Clean up resolved refs from unresolved_refs table so metrics are accurate
@@ -668,8 +691,9 @@ export class ReferenceResolver {
 
       // Persist edges immediately
       const edges = this.createEdges(result.resolved);
-      if (edges.length > 0) {
-        this.queries.insertEdges(edges);
+      const validEdges = this.filterEdgesByExistingNodes(edges);
+      if (validEdges.length > 0) {
+        this.queries.insertEdges(validEdges);
       }
 
       // Clean up resolved refs so they don't appear in the next batch
