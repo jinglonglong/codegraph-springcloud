@@ -387,6 +387,22 @@ export class TreeSitterExtractor {
     else if (nodeType === 'impl_item') {
       this.extractRustImplItem(node);
     }
+    // TypeScript interface members: property_signature (`foo: T`, `foo?: T`)
+    // and method_signature (`foo(arg: A): R`) both carry type annotations the
+    // interface walker would otherwise drop. Extract them as `references`
+    // edges from the interface so resolvers can wire callers/impact for
+    // types that only appear in interface members.
+    else if (
+      (nodeType === 'property_signature' || nodeType === 'method_signature') &&
+      this.isInsideClassLikeNode() &&
+      this.TYPE_ANNOTATION_LANGUAGES.has(this.language)
+    ) {
+      const parentId = this.nodeStack[this.nodeStack.length - 1];
+      if (parentId) {
+        this.extractTypeAnnotations(node, parentId);
+      }
+      // don't skipChildren — nested signatures still need traversal
+    }
 
     // Visit children (unless the extract method already visited them)
     if (!skipChildren) {
