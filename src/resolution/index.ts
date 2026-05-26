@@ -186,6 +186,35 @@ export class ReferenceResolver {
   }
 
   /**
+   * Run each framework resolver's cross-file finalization pass and persist
+   * the returned node updates. Idempotent — safe to call after every indexAll
+   * and every incremental sync. Returns the number of nodes updated.
+   *
+   * Caches are cleared before/after so the post-extract pass sees fresh DB
+   * state and downstream queries see the updated names.
+   */
+  runPostExtract(): number {
+    let updated = 0;
+    this.clearCaches();
+    for (const fw of this.frameworks) {
+      if (!fw.postExtract) continue;
+      try {
+        const nodes = fw.postExtract(this.context);
+        for (const node of nodes) {
+          this.queries.updateNode(node);
+          updated++;
+        }
+      } catch (err) {
+        logDebug(`Framework '${fw.name}' postExtract failed`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    if (updated > 0) this.clearCaches();
+    return updated;
+  }
+
+  /**
    * Pre-build lightweight caches for resolution.
    * Node lookups are now handled by indexed SQLite queries instead of
    * loading all nodes into memory (which caused OOM on large codebases).

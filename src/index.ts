@@ -336,6 +336,9 @@ export class CodeGraph {
         // chance to see the actual project before resolution runs.
         if (result.success && result.filesIndexed > 0) {
           this.resolver.initialize();
+          // Cross-file finalization (e.g. NestJS RouterModule prefixes). Runs
+          // before resolution so updated names show up in subsequent reads.
+          this.resolver.runPostExtract();
         }
 
         // Resolve references to create call/import/extends edges
@@ -405,6 +408,14 @@ export class CodeGraph {
       }
       try {
         const result = await this.orchestrator.sync(options.onProgress);
+
+        // Cross-file finalization (e.g. NestJS RouterModule prefixes). Run on
+        // every sync that touched files so edits to `app.module.ts` propagate
+        // to controllers in unchanged files. The pass is idempotent and cheap
+        // (regex over *.module.ts only).
+        if (result.filesAdded > 0 || result.filesModified > 0) {
+          this.resolver.runPostExtract();
+        }
 
         // Resolve references if files were updated
         if (result.filesAdded > 0 || result.filesModified > 0) {

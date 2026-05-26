@@ -9,6 +9,9 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **NestJS: `RouterModule.register([...])` route prefixes now propagate to controller routes.** Previously a controller declared inside a module wired through NestJS's `RouterModule` (a common pattern for modular apps with nested route prefixes) was indexed with its raw `@Controller(...) + @Get(...)` path — so `UsersController` under `RouterModule.register([{ path: 'admin', module: AdminModule, children: [{ path: 'users', module: UsersModule }] }])` showed up as `GET /` instead of `GET /admin/users`. The new cross-file pass walks every `*.module.{ts,js}` for `RouterModule.register/forRoot/forChild([...])` (recursive `children`) and `@Module({ controllers: [...] })`, then prepends the correct prefix to each affected route — including non-empty `@Controller` paths and method-level params (`/admin/users/:id`). The route node's `id` is preserved across the update so existing route→handler edges stay intact, and the pass is idempotent so incremental sync recovers when `app.module.ts` itself is edited. Closes #459.
+
 ### Added
 - **Installer targets for Gemini CLI and the Antigravity IDE.** `codegraph install` (and the interactive prompt) now detect and configure two more agents out of the box:
   - **Gemini CLI** (also covers the rebranded Antigravity CLI) — writes `mcpServers.codegraph` to `~/.gemini/settings.json` (global) or `./.gemini/settings.json` (local), and the codegraph usage block into `~/.gemini/GEMINI.md` / `./GEMINI.md`. Existing top-level settings (e.g. `security.auth`) and sibling MCP servers are preserved.

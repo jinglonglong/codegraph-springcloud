@@ -148,6 +148,20 @@ export interface FrameworkResolver {
    * pipeline; the framework's own `resolve()` is one of the strategies tried.
    */
   extract?(filePath: string, content: string): FrameworkExtractionResult;
+  /**
+   * Cross-file finalization pass, called once after all per-file extraction
+   * completes (and again on every incremental sync). Used by frameworks where
+   * a symbol's final representation depends on a sibling file the per-file
+   * `extract()` never saw — e.g. NestJS's `RouterModule.register([...])`
+   * sets route prefixes for controllers declared elsewhere.
+   *
+   * Implementations return route/etc. nodes with mutated fields (typically
+   * `name`); the orchestrator persists each via `updateNode`. The node `id`
+   * MUST be preserved so existing edges (route → handler, etc.) stay intact;
+   * `qualifiedName` SHOULD be preserved so the pass stays idempotent — a
+   * second run can recover the original in-file form from `qualifiedName`.
+   */
+  postExtract?(context: ResolutionContext): Node[];
 }
 
 /**
