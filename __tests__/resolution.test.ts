@@ -12,7 +12,7 @@ import { CodeGraph } from '../src';
 import { Node, UnresolvedReference } from '../src/types';
 import { ReferenceResolver, createResolver, ResolutionContext } from '../src/resolution';
 import { matchReference } from '../src/resolution/name-matcher';
-import { resolveImportPath, extractImportMappings } from '../src/resolution/import-resolver';
+import { resolveImportPath, extractImportMappings, loadCppIncludeDirs, clearCppIncludeDirCache } from '../src/resolution/import-resolver';
 import { detectFrameworks, getAllFrameworkResolvers } from '../src/resolution/frameworks';
 import { QueryBuilder } from '../src/db/queries';
 import { DatabaseConnection } from '../src/db';
@@ -1136,6 +1136,360 @@ func main() {
       expect(signInNode).toBeDefined();
       const callers = cg.getCallers(signInNode!.id);
       expect(callers.some((c) => c.node.filePath === 'src/main.ts')).toBe(true);
+    });
+  });
+
+  describe('C/C++ Import Resolution', () => {
+    afterEach(() => {
+      clearCppIncludeDirCache();
+    });
+
+    it('should resolve C include to header in same directory', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: (p) => p === 'utils.h',
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => ['utils.h', 'main.c'],
+      };
+
+      const result = resolveImportPath(
+        'utils.h',
+        'main.c',
+        'c',
+        context
+      );
+
+      expect(result).toBe('utils.h');
+    });
+
+    it('should resolve C++ include with .hpp extension', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: (p) => p === 'include/myclass.hpp',
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => ['include/myclass.hpp', 'src/main.cpp'],
+        getCppIncludeDirs: () => ['include'],
+      };
+
+      const result = resolveImportPath(
+        'myclass.hpp',
+        'src/main.cpp',
+        'cpp',
+        context
+      );
+
+      expect(result).toBe('include/myclass.hpp');
+    });
+
+    it('should resolve include with subdirectory path', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: (p) => p === 'utils/helpers.h',
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => ['utils/helpers.h', 'main.c'],
+      };
+
+      const result = resolveImportPath(
+        'utils/helpers.h',
+        'main.c',
+        'c',
+        context
+      );
+
+      expect(result).toBe('utils/helpers.h');
+    });
+
+    it('should resolve include via include directories', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: (p) => p === 'include/myheader.h',
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => ['include/myheader.h', 'src/main.cpp'],
+        getCppIncludeDirs: () => ['include'],
+      };
+
+      const result = resolveImportPath(
+        'myheader.h',
+        'src/main.cpp',
+        'cpp',
+        context
+      );
+
+      expect(result).toBe('include/myheader.h');
+    });
+
+    it('should resolve include trying multiple extensions', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        // myclass.h does not exist, but myclass.hpp does
+        fileExists: (p) => p === 'include/myclass.hpp',
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => ['include/myclass.hpp', 'src/main.cpp'],
+        getCppIncludeDirs: () => ['include'],
+      };
+
+      const result = resolveImportPath(
+        'myclass',
+        'src/main.cpp',
+        'cpp',
+        context
+      );
+
+      expect(result).toBe('include/myclass.hpp');
+    });
+
+    it('should return null for system headers', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: () => true,
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => [],
+      };
+
+      // C standard library header
+      expect(resolveImportPath('stdio.h', 'main.c', 'c', context)).toBeNull();
+      // C++ standard library header
+      expect(resolveImportPath('vector', 'main.cpp', 'cpp', context)).toBeNull();
+      // C++ C-wrapper header
+      expect(resolveImportPath('cstdio', 'main.cpp', 'cpp', context)).toBeNull();
+    });
+
+    it('should return null for single-component third-party paths that cannot be resolved', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: () => false,
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => [],
+        getCppIncludeDirs: () => [],
+      };
+
+      // Third-party bare header without path — not resolvable, returns null
+      const result = resolveImportPath(
+        'openssl/ssl.h',
+        'main.cpp',
+        'cpp',
+        context
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('should not filter project headers with path separators', () => {
+      const context: ResolutionContext = {
+        getNodesInFile: () => [],
+        getNodesByName: () => [],
+        getNodesByQualifiedName: () => [],
+        getNodesByKind: () => [],
+        fileExists: (p) => p === 'mylib/utils.h',
+        readFile: () => null,
+        getProjectRoot: () => '',
+        getAllFiles: () => ['mylib/utils.h'],
+      };
+
+      // Path with separator should NOT be filtered as external
+      const result = resolveImportPath(
+        'mylib/utils.h',
+        'main.c',
+        'c',
+        context
+      );
+
+      expect(result).toBe('mylib/utils.h');
+    });
+
+    it('should extract C/C++ import mappings from #include directives', () => {
+      const code = `#include <iostream>
+#include "myheader.h"
+#include "utils/helpers.hpp"`;
+
+      const mappings = extractImportMappings('main.cpp', code, 'cpp');
+
+      expect(mappings.length).toBe(3);
+      expect(mappings[0]).toEqual({
+        localName: 'iostream',
+        exportedName: '*',
+        source: 'iostream',
+        isDefault: false,
+        isNamespace: true,
+      });
+      expect(mappings[1]).toEqual({
+        localName: 'myheader',
+        exportedName: '*',
+        source: 'myheader.h',
+        isDefault: false,
+        isNamespace: true,
+      });
+      expect(mappings[2]).toEqual({
+        localName: 'helpers',
+        exportedName: '*',
+        source: 'utils/helpers.hpp',
+        isDefault: false,
+        isNamespace: true,
+      });
+    });
+
+    it('should discover include directories from compile_commands.json', () => {
+      // Create a temp project with compile_commands.json
+      const tempProject = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-cpp-test-'));
+      try {
+        const compileDb = [
+          {
+            directory: tempProject,
+            command: 'g++ -Iinclude -Isrc/lib -isystem /usr/include -c src/main.cpp',
+            file: 'src/main.cpp',
+          },
+        ];
+        fs.writeFileSync(
+          path.join(tempProject, 'compile_commands.json'),
+          JSON.stringify(compileDb)
+        );
+        // Create the include dirs so they exist
+        fs.mkdirSync(path.join(tempProject, 'include'), { recursive: true });
+        fs.mkdirSync(path.join(tempProject, 'src', 'lib'), { recursive: true });
+
+        clearCppIncludeDirCache();
+        const dirs = loadCppIncludeDirs(tempProject);
+
+        // Should find include and src/lib (relative to project root)
+        // /usr/include is absolute and outside project, should be excluded
+        expect(dirs).toContain('include');
+        expect(dirs).toContain('src/lib');
+        expect(dirs.some(d => d.includes('usr'))).toBe(false);
+      } finally {
+        fs.rmSync(tempProject, { recursive: true });
+      }
+    });
+
+    it('should fall back to heuristic include dirs when no compile_commands.json', () => {
+      const tempProject = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-cpp-test-'));
+      try {
+        // Create include/ and src/ directories with headers
+        fs.mkdirSync(path.join(tempProject, 'include'), { recursive: true });
+        fs.writeFileSync(path.join(tempProject, 'include', 'types.h'), '');
+        fs.mkdirSync(path.join(tempProject, 'src'), { recursive: true });
+        fs.writeFileSync(path.join(tempProject, 'src', 'main.cpp'), '');
+        // Create a directory without headers — should not be included
+        fs.mkdirSync(path.join(tempProject, 'docs'), { recursive: true });
+
+        clearCppIncludeDirCache();
+        const dirs = loadCppIncludeDirs(tempProject);
+
+        expect(dirs).toContain('include');
+        expect(dirs).toContain('src');
+        expect(dirs).not.toContain('docs');
+      } finally {
+        fs.rmSync(tempProject, { recursive: true });
+      }
+    });
+
+    // Documents the cross-language `.h` behavior. Objective-C and C++ share
+    // the `.h` extension, so in a mixed iOS-style project an Obj-C header
+    // dir gets claimed as a C/C++ include dir too. That's intentional — a
+    // C++ file legitimately can `#include "Foo.h"` against an Obj-C header
+    // (Obj-C++ / .mm callers), and false-positive inclusion is far cheaper
+    // than missing real resolutions. The test pins this so a later
+    // "exclude objc dirs" refactor breaks loudly and reviewers see the
+    // trade-off explicitly.
+    it('heuristic claims any top-level dir containing .h files, including Obj-C', () => {
+      const tempProject = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-cpp-test-'));
+      try {
+        // C++ side: an `cppmod` dir with a .hpp (C++-only extension)
+        fs.mkdirSync(path.join(tempProject, 'cppmod'), { recursive: true });
+        fs.writeFileSync(path.join(tempProject, 'cppmod', 'shared.hpp'), '');
+        // Obj-C side: an `iosmod` dir with .h + .m (no .cpp/.hpp).
+        fs.mkdirSync(path.join(tempProject, 'iosmod'), { recursive: true });
+        fs.writeFileSync(path.join(tempProject, 'iosmod', 'View.h'), '');
+        fs.writeFileSync(path.join(tempProject, 'iosmod', 'View.m'), '');
+
+        clearCppIncludeDirCache();
+        const dirs = loadCppIncludeDirs(tempProject);
+
+        // Both included — Obj-C dirs are intentionally allowed.
+        expect(dirs).toContain('cppmod');
+        expect(dirs).toContain('iosmod');
+      } finally {
+        fs.rmSync(tempProject, { recursive: true });
+      }
+    });
+
+    // End-to-end: ensure `#include "X.h"` produces a file→file `imports` edge
+    // in the actual indexing pipeline (not just a phantom file→import-node
+    // edge). This pins the include-dir resolution path so the headline PR
+    // feature can't silently regress to a no-op in the indexing flow.
+    it('connects #include to the real header file via include-dir scan (end-to-end)', async () => {
+      const tempProject = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-cpp-e2e-'));
+      try {
+        fs.mkdirSync(path.join(tempProject, 'include'), { recursive: true });
+        fs.mkdirSync(path.join(tempProject, 'src'), { recursive: true });
+        fs.writeFileSync(
+          path.join(tempProject, 'include', 'utils.h'),
+          `#ifndef UTILS_H\n#define UTILS_H\nint add(int, int);\n#endif\n`
+        );
+        fs.writeFileSync(
+          path.join(tempProject, 'src', 'main.cpp'),
+          `#include "utils.h"\n#include <vector>\nint main(){ return add(1,2); }\n`
+        );
+
+        clearCppIncludeDirCache();
+        cg = await CodeGraph.init(tempProject, { index: true });
+
+        // Sanity: file nodes exist for the header and the cpp.
+        const allFiles = cg.getStats();
+        expect(allFiles.fileCount).toBe(2);
+
+        // The `#include "utils.h"` edge should target the real
+        // `include/utils.h` file node — not a floating `import` node
+        // living inside main.cpp.
+        const db = DatabaseConnection.open(path.join(tempProject, '.codegraph', 'codegraph.db'));
+        const rows = db.getDb().prepare(`
+          select dst.kind as dstKind, dst.file_path as dstPath
+          from edges e
+          join nodes src on e.source = src.id
+          join nodes dst on e.target = dst.id
+          where e.kind = 'imports'
+            and src.kind = 'file'
+            and src.file_path = 'src/main.cpp'
+        `).all() as Array<{ dstKind: string; dstPath: string }>;
+        const resolvedToHeader = rows.find(
+          (r) => r.dstKind === 'file' && r.dstPath === 'include/utils.h'
+        );
+        expect(resolvedToHeader, 'main.cpp → include/utils.h imports edge missing').toBeDefined();
+        // `<vector>` should NOT produce a file edge — it's a stdlib header.
+        const stdlibFile = rows.find(
+          (r) => r.dstKind === 'file' && r.dstPath && r.dstPath.endsWith('vector')
+        );
+        expect(stdlibFile).toBeUndefined();
+      } finally {
+        fs.rmSync(tempProject, { recursive: true, force: true });
+      }
     });
   });
 });
