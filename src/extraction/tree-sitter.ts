@@ -215,7 +215,17 @@ export class TreeSitterExtractor {
 
       // Push file node onto stack so top-level declarations get contains edges
       this.nodeStack.push(fileNode.id);
+
+      // File-level package declaration (Kotlin/Java). Creates an implicit
+      // `namespace` node wrapping every top-level declaration so their
+      // qualifiedName carries the FQN — required for cross-file import
+      // resolution on JVM languages where filename ≠ class name.
+      const packageNodeId = this.extractFilePackage(this.tree.rootNode);
+      if (packageNodeId) this.nodeStack.push(packageNodeId);
+
       this.visitNode(this.tree.rootNode);
+
+      if (packageNodeId) this.nodeStack.pop();
       this.nodeStack.pop();
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -378,6 +388,17 @@ export class TreeSitterExtractor {
     // their own `calls` refs.
     else if (INSTANTIATION_KINDS.has(nodeType)) {
       this.extractInstantiation(node);
+      // Java/C# `new T(...) { ... }` — anonymous class with body. Without
+      // extracting it as a class node + its methods, the interface→impl
+      // synthesizer (Phase 5.5) can't bridge T's abstract methods to the
+      // anonymous overrides, and an agent investigating a call through T
+      // (`strategy.iterator(...)` where strategy is a Strategy lambda body)
+      // has to Read the file to find the actual implementation.
+      const anonBody = this.findAnonymousClassBody(node);
+      if (anonBody) {
+        this.extractAnonymousClass(node, anonBody);
+        skipChildren = true;
+      }
     }
     // (Decorator handling lives inside the symbol-creating extractors
     // — extractClass / extractFunction / extractProperty — because the
@@ -488,6 +509,33 @@ export class TreeSitterExtractor {
       if (child && types.includes(child.type)) return child;
     }
     return null;
+  }
+
+  /**
+   * Find a `packageTypes` child under the root, create a `namespace` node
+   * for it, and return its id so the caller can scope top-level
+   * declarations underneath. Returns null when no package header is
+   * present (script files, .kts without a package).
+   */
+  private extractFilePackage(rootNode: SyntaxNode): string | null {
+    const types = this.extractor?.packageTypes;
+    if (!types || types.length === 0 || !this.extractor?.extractPackage) return null;
+
+    let pkgNode: SyntaxNode | null = null;
+    for (let i = 0; i < rootNode.namedChildCount; i++) {
+      const child = rootNode.namedChild(i);
+      if (child && types.includes(child.type)) {
+        pkgNode = child;
+        break;
+      }
+    }
+    if (!pkgNode) return null;
+
+    const pkgName = this.extractor.extractPackage(pkgNode, this.source);
+    if (!pkgName) return null;
+
+    const ns = this.createNode('namespace', pkgName, pkgNode);
+    return ns?.id ?? null;
   }
 
   /**
@@ -1748,6 +1796,78 @@ export class TreeSitterExtractor {
   }
 
   /**
+   * Find a `class_body` child of an `object_creation_expression` — the
+   * marker for an anonymous class (`new T() { ... }`). Returns the body
+   * node so the caller can walk it as the anon class's members.
+   */
+  private findAnonymousClassBody(node: SyntaxNode): SyntaxNode | null {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      // Java: `class_body`. C# uses the same node kind.
+      if (child && (child.type === 'class_body' || child.type === 'declaration_list')) {
+        return child;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract a Java/C# anonymous class — `new T() { ...members }`. Emits a
+   * `class` node named `<T$anon@line>`, an `extends` reference to T (so
+   * Phase 5.5 interface-impl can bridge), and walks the body so its
+   * `method_declaration` members become method nodes under the anon class.
+   *
+   * Why this matters: without anon-class extraction, the overrides inside
+   * a lambda-returned `new T() { @Override int foo(){...} }` are not nodes,
+   * so a call through T.foo (the abstract parent method) has no static
+   * target — the agent has to Read the file to find the implementation.
+   */
+  private extractAnonymousClass(node: SyntaxNode, body: SyntaxNode): void {
+    if (!this.extractor) return;
+
+    // The instantiated type sits in the same field/position that
+    // extractInstantiation reads from. Use the same lookup so the anon
+    // class's `extends` target matches the `instantiates` edge.
+    const typeNode =
+      getChildByField(node, 'constructor') ||
+      getChildByField(node, 'type') ||
+      getChildByField(node, 'name') ||
+      node.namedChild(0);
+    let typeName = typeNode ? getNodeText(typeNode, this.source) : 'Object';
+    const ltIdx = typeName.indexOf('<');
+    if (ltIdx > 0) typeName = typeName.slice(0, ltIdx);
+    const lastDot = Math.max(typeName.lastIndexOf('.'), typeName.lastIndexOf('::'));
+    if (lastDot >= 0) typeName = typeName.slice(lastDot + 1).replace(/^[:.]/, '');
+    typeName = typeName.trim() || 'Object';
+
+    const anonName = `<${typeName}$anon@${node.startPosition.row + 1}>`;
+    const classNode = this.createNode('class', anonName, node, {});
+    if (!classNode) return;
+
+    // The anonymous class implicitly extends/implements the named type.
+    // We can't tell at extraction time whether T is a class or an interface,
+    // so emit `extends`. Resolution will still bind T to whatever it is, and
+    // Phase 5.5 (which already handles both `extends` and `implements`) will
+    // bridge T's methods to the override names found in the anon body.
+    this.unresolvedReferences.push({
+      fromNodeId: classNode.id,
+      referenceName: typeName,
+      referenceKind: 'extends',
+      line: typeNode?.startPosition.row ?? node.startPosition.row,
+      column: typeNode?.startPosition.column ?? node.startPosition.column,
+    });
+
+    // Walk the body's children so method_declaration nodes inside become
+    // method nodes scoped to the anon class.
+    this.nodeStack.push(classNode.id);
+    for (let i = 0; i < body.namedChildCount; i++) {
+      const child = body.namedChild(i);
+      if (child) this.visitNode(child);
+    }
+    this.nodeStack.pop();
+  }
+
+  /**
    * Scan `declNode` and its preceding siblings (within the parent's
    * named children) for decorator nodes, emitting a `decorates`
    * reference from `decoratedId` to each decorator's function name.
@@ -1876,6 +1996,14 @@ export class TreeSitterExtractor {
         // about `call_expression`, so constructor invocations
         // produced no graph edges at all.
         this.extractInstantiation(node);
+        // Anonymous class with body: `new T() { ... }` (Java/C#). Extract as
+        // a class so interface-impl synthesis (Phase 5.5) can bridge T's
+        // methods to the overrides — same rationale as in visitNode.
+        const anonBody = this.findAnonymousClassBody(node);
+        if (anonBody) {
+          this.extractAnonymousClass(node, anonBody);
+          return;
+        }
       } else if (this.extractor!.extractBareCall) {
         const calleeName = this.extractor!.extractBareCall(node, this.source);
         if (calleeName && this.nodeStack.length > 0) {

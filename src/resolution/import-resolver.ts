@@ -948,6 +948,41 @@ export function extractReExports(content: string, language: Language): ReExport[
 /**
  * Resolve a reference using import mappings
  */
+/**
+ * JVM (Java / Kotlin) imports use fully-qualified names (`import
+ * com.example.foo.Bar`) decoupled from filenames, so the JS/Python
+ * style filesystem path lookup misses them whenever the file isn't
+ * named after its primary symbol (Kotlin `Utils.kt` exporting `Bar`,
+ * top-level fns, extension fns). Resolve them through the
+ * `qualifiedName` index instead — populated by the package_header /
+ * package_declaration namespace wrappers in the extractor.
+ */
+export function resolveJvmImport(
+  ref: UnresolvedRef,
+  context: ResolutionContext
+): ResolvedRef | null {
+  if (ref.referenceKind !== 'imports') return null;
+  if (ref.language !== 'java' && ref.language !== 'kotlin') return null;
+
+  const fqn = ref.referenceName;
+  const lastDot = fqn.lastIndexOf('.');
+  if (lastDot <= 0) return null;
+  const pkg = fqn.substring(0, lastDot);
+  const sym = fqn.substring(lastDot + 1);
+  // Wildcard imports (`com.example.*`) deliberately punt to name-matcher.
+  if (sym === '*') return null;
+
+  const candidates = context.getNodesByQualifiedName(`${pkg}::${sym}`);
+  if (candidates.length === 0) return null;
+
+  return {
+    original: ref,
+    targetNodeId: candidates[0]!.id,
+    confidence: 0.95,
+    resolvedBy: 'import',
+  };
+}
+
 export function resolveViaImport(
   ref: UnresolvedRef,
   context: ResolutionContext

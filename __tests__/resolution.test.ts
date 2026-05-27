@@ -12,7 +12,8 @@ import { CodeGraph } from '../src';
 import { Node, UnresolvedReference } from '../src/types';
 import { ReferenceResolver, createResolver, ResolutionContext } from '../src/resolution';
 import { matchReference } from '../src/resolution/name-matcher';
-import { resolveImportPath, extractImportMappings, loadCppIncludeDirs, clearCppIncludeDirCache } from '../src/resolution/import-resolver';
+import { resolveImportPath, extractImportMappings, resolveJvmImport, loadCppIncludeDirs, clearCppIncludeDirCache } from '../src/resolution/import-resolver';
+import type { UnresolvedRef } from '../src/resolution/types';
 import { detectFrameworks, getAllFrameworkResolvers } from '../src/resolution/frameworks';
 import { QueryBuilder } from '../src/db/queries';
 import { DatabaseConnection } from '../src/db';
@@ -350,6 +351,116 @@ from ..services import auth_service
       expect(mappings.length).toBeGreaterThan(0);
       expect(mappings.some((m) => m.localName === 'helper')).toBe(true);
       expect(mappings.some((m) => m.localName === 'User')).toBe(true);
+    });
+  });
+
+  describe('JVM FQN Import Resolution', () => {
+    // Build a ResolutionContext stub whose getNodesByQualifiedName answers
+    // from a fixed table — the only context method resolveJvmImport touches.
+    const makeContext = (byQName: Record<string, Node[]>): ResolutionContext => ({
+      getNodesInFile: () => [],
+      getNodesByName: () => [],
+      getNodesByQualifiedName: (q) => byQName[q] ?? [],
+      getNodesByKind: () => [],
+      fileExists: () => false,
+      readFile: () => null,
+      getProjectRoot: () => '',
+      getAllFiles: () => [],
+    });
+    const node = (id: string, name: string, qualifiedName: string, kind: Node['kind'] = 'class', language: Node['language'] = 'kotlin'): Node => ({
+      id, kind, name, qualifiedName,
+      filePath: 'Models.kt', language,
+      startLine: 1, endLine: 1, startColumn: 0, endColumn: 0,
+      updatedAt: 0,
+    });
+    const importRef = (referenceName: string, language: Node['language'] = 'kotlin'): UnresolvedRef => ({
+      fromNodeId: 'caller',
+      referenceName,
+      referenceKind: 'imports',
+      line: 1, column: 0,
+      filePath: 'Caller.kt',
+      language,
+    });
+
+    it('resolves a Kotlin class import by FQN regardless of filename', () => {
+      const target = node('n1', 'Bar', 'com.example.foo::Bar');
+      const ctx = makeContext({ 'com.example.foo::Bar': [target] });
+      const result = resolveJvmImport(importRef('com.example.foo.Bar'), ctx);
+      expect(result?.targetNodeId).toBe('n1');
+      expect(result?.resolvedBy).toBe('import');
+    });
+
+    it('resolves a Kotlin top-level function import by FQN', () => {
+      const util = node('n2', 'util', 'com.example.foo::util', 'function');
+      const ctx = makeContext({ 'com.example.foo::util': [util] });
+      const result = resolveJvmImport(importRef('com.example.foo.util'), ctx);
+      expect(result?.targetNodeId).toBe('n2');
+    });
+
+    it('resolves a Java import by FQN', () => {
+      const target = node('n3', 'Bar', 'com.example.foo::Bar', 'class', 'java');
+      const ctx = makeContext({ 'com.example.foo::Bar': [target] });
+      const result = resolveJvmImport(importRef('com.example.foo.Bar', 'java'), ctx);
+      expect(result?.targetNodeId).toBe('n3');
+    });
+
+    it('resolves cross-language: Kotlin importing a Java class', () => {
+      // The Kotlin file declares `import com.example.JavaBar` — the target is
+      // a Java class node. JVM interop means the resolver doesn't care about
+      // the source language of the target, only that the FQN matches.
+      const target = node('n4', 'JavaBar', 'com.example::JavaBar', 'class', 'java');
+      const ctx = makeContext({ 'com.example::JavaBar': [target] });
+      const result = resolveJvmImport(importRef('com.example.JavaBar'), ctx);
+      expect(result?.targetNodeId).toBe('n4');
+    });
+
+    it('disambiguates a name collision across packages', () => {
+      // Two classes named `Bar` in different packages. Each import resolves
+      // to the one whose FQN matches — not to "whichever was found first".
+      const barA = node('n5a', 'Bar', 'com.example.alpha::Bar');
+      const barB = node('n5b', 'Bar', 'com.example.beta::Bar');
+      const ctx = makeContext({
+        'com.example.alpha::Bar': [barA],
+        'com.example.beta::Bar': [barB],
+      });
+      expect(resolveJvmImport(importRef('com.example.alpha.Bar'), ctx)?.targetNodeId).toBe('n5a');
+      expect(resolveJvmImport(importRef('com.example.beta.Bar'), ctx)?.targetNodeId).toBe('n5b');
+    });
+
+    it('returns null for wildcard imports', () => {
+      const ctx = makeContext({});
+      expect(resolveJvmImport(importRef('com.example.foo.*'), ctx)).toBeNull();
+    });
+
+    it('returns null for unqualified names', () => {
+      // A single-segment name has no package; nothing to look up by FQN.
+      const ctx = makeContext({ 'Bar': [node('n6', 'Bar', 'Bar')] });
+      expect(resolveJvmImport(importRef('Bar'), ctx)).toBeNull();
+    });
+
+    it('returns null for non-JVM languages', () => {
+      const target = node('n7', 'Bar', 'com.example::Bar');
+      const ctx = makeContext({ 'com.example::Bar': [target] });
+      expect(resolveJvmImport(importRef('com.example.Bar', 'typescript'), ctx)).toBeNull();
+    });
+
+    it('returns null for non-imports reference kinds', () => {
+      // The resolver intentionally only acts on `imports` refs; ordinary
+      // `calls`/`extends` refs fall through to the framework + name-matcher
+      // strategies.
+      const target = node('n8', 'Bar', 'com.example::Bar');
+      const ctx = makeContext({ 'com.example::Bar': [target] });
+      const ref: UnresolvedRef = {
+        fromNodeId: 'caller', referenceName: 'com.example.Bar',
+        referenceKind: 'calls', line: 1, column: 0,
+        filePath: 'Caller.kt', language: 'kotlin',
+      };
+      expect(resolveJvmImport(ref, ctx)).toBeNull();
+    });
+
+    it('returns null when the FQN is not in the index', () => {
+      const ctx = makeContext({});
+      expect(resolveJvmImport(importRef('com.example.Unknown'), ctx)).toBeNull();
     });
   });
 
@@ -848,7 +959,7 @@ public class Handler {
 
       const use = cg
         .getNodesByKind('method')
-        .find((n) => n.qualifiedName === 'Handler::use');
+        .find((n) => n.qualifiedName === 'com.example.web::Handler::use');
       expect(use).toBeDefined();
       const calls = cg.getOutgoingEdges(use!.id).filter((e) => e.kind === 'calls');
       expect(calls.length).toBeGreaterThanOrEqual(1);

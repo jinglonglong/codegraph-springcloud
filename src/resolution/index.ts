@@ -17,7 +17,7 @@ import {
   ImportMapping,
 } from './types';
 import { matchReference } from './name-matcher';
-import { resolveViaImport, extractImportMappings, extractReExports, loadCppIncludeDirs } from './import-resolver';
+import { resolveViaImport, resolveJvmImport, extractImportMappings, extractReExports, loadCppIncludeDirs } from './import-resolver';
 import { detectFrameworks } from './frameworks';
 import { synthesizeCallbackEdges } from './callback-synthesizer';
 import { loadProjectAliases, type AliasMap } from './path-aliases';
@@ -528,6 +528,14 @@ export class ReferenceResolver {
       // Also check capitalized receiver (instance-method resolution)
       const capitalized = receiver.charAt(0).toUpperCase() + receiver.slice(1);
       if (this.knownNames.has(capitalized)) return true;
+      // JVM FQN: `com.example.foo.Bar` — the only useful segment is the
+      // last one (`Bar`); the earlier check finds `example.foo.Bar` which
+      // never matches a node name.
+      const lastDot = name.lastIndexOf('.');
+      if (lastDot > dotIdx) {
+        const tail = name.substring(lastDot + 1);
+        if (tail && this.knownNames.has(tail)) return true;
+      }
     }
     const colonIdx = name.indexOf('::');
     if (colonIdx > 0) {
@@ -587,6 +595,12 @@ export class ReferenceResolver {
     ) {
       return null;
     }
+
+    // JVM FQN imports skip framework/name-matcher: `import com.example.Bar`
+    // resolves directly through the qualifiedName index, which is unambiguous
+    // even when several `Bar` classes exist in different packages.
+    const jvmImport = resolveJvmImport(ref, this.context);
+    if (jvmImport) return jvmImport;
 
     const candidates: ResolvedRef[] = [];
 

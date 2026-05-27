@@ -9,6 +9,35 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Java / Kotlin imports now resolve by fully-qualified name.** Extraction
+  wraps every top-level declaration of a `.kt` / `.java` file in a `namespace`
+  node carrying the file's `package` (so a class `Bar` in
+  `package com.example.foo` is indexed with qualifiedName
+  `com.example.foo::Bar`), and `import com.example.foo.Bar` looks the target
+  up through that index — regardless of whether the class lives in `Bar.kt`,
+  `Models.kt`, or a top-level function. Disambiguates same-name classes
+  across packages (the central failure mode of the previous name-matcher
+  fallback in multi-module Spring / Android codebases), works across the
+  Java↔Kotlin interop boundary, and lays groundwork for binding-precise
+  Dagger2 / Hilt resolution. Wildcard imports (`com.example.*`) still go
+  through name-matcher.
+- **Java / C# anonymous classes (`new T() { ... }`) are now extracted as
+  first-class class nodes with their overrides.** Previously, an anonymous
+  subclass returned from a factory or lambda — `return new BaseIter() {
+  @Override int separatorStart(int s) { ... } };` — produced only an
+  `instantiates` edge: the override methods were invisible to the graph and
+  Phase 5.5 interface-impl synthesis had no class to bridge. The anon class
+  now lands as `<TypeName$anon@line>` with an `extends` reference to the
+  named base/interface, scoped under the enclosing method, and its
+  `method_declaration` members become normal method nodes. The interface→impl
+  synthesizer then bridges the base's abstract methods to the anonymous
+  overrides automatically. Concrete effect on `google/guava` (3,227 .java
+  files): 3,608 anonymous classes extracted, +2,534 interface-impl edges
+  reach overrides hidden in `new T() { ... }` blocks (including lambda
+  bodies). An agent investigating `Splitter.SplittingIterator.separatorStart`
+  now sees the four anonymous overrides in its trail without a Read.
+
 ### Fixed
 - **`codegraph index` / `init -i` summary now reports the true edge count.**
   The per-file counter in the orchestrator only saw extraction-phase edges,
