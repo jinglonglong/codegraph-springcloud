@@ -230,7 +230,10 @@ export class JsonCodec extends Codec {
   encode(input: string): string { return '{' + input + '}'; }
 }
 export class XmlCodec extends Codec {
-  encode(input: string): string { return '<' + input + '>'; }
+  encode(input: string): string {
+    const detail = 'XML_BODY_MARKER';
+    return '<' + input + detail + '>';
+  }
 }
 export class YamlCodec extends Codec {
   encode(input: string): string { return '- ' + input; }
@@ -355,19 +358,34 @@ export class YamlCodec extends Codec {
     expect(bridge).not.toContain('BRIDGE_BODY_MARKER');
   });
 
-  it('skeletonizes a base+subclasses family file even when named (compiler.py: family override beats the named spare)', async () => {
+  it('collapses a base+subclasses family file to a FOCUSED view — base method body kept, non-named subclasses signature-only (compiler.py)', async () => {
     const result = await handler.execute('codegraph_explore', { query: SPARE_QUERY, maxFiles: 15 });
     const text = result.content?.[0]?.text ?? '';
 
     // codec.ts defines the base Codec (>=3 subclasses extend it) and co-locates the
-    // subclasses — a redundant, Read-anyway "family" file (Django's compiler.py). Even
-    // though the agent named `encode`, it STILL skeletonizes: a full one would eat the
-    // explore budget and starve the sibling files. Contrast auth-interceptor.ts above,
-    // which is named AND not a family file → spared. This is the override that keeps
-    // Django from regressing (sparing the family file cost more and Read more).
+    // subclasses — a "family" file (Django's compiler.py). The family-override fires
+    // (it is NOT spared into a full clustered render despite the named `encode`), so
+    // it COLLAPSES — but per-symbol: the named base method `Codec.encode` keeps its
+    // body (so the agent doesn't Read it back — Django's SQLCompiler.execute_sql),
+    // while a non-named subclass (XmlCodec) collapses to a signature. That packs the
+    // mechanism into budget without the redundant subclass bodies.
     const codec = sectionFor(text, 'codec.ts');
     expect(codec, 'codec.ts should be present').not.toBe('');
-    expect(codec, 'a named base+subclasses family file still skeletonizes (budget)').toContain(SKELETON_MARK);
-    expect(codec, 'the elided base body marker must NOT survive').not.toContain('CODEC_BASE_MARKER');
+    expect(codec, 'a named family file collapses to a focused (not full) view').toContain('· focused');
+    expect(codec, 'the named base method body is kept (no Read-back)').toContain('CODEC_BASE_MARKER');
+    expect(codec, 'a non-named subclass body is elided to a signature').not.toContain('XML_BODY_MARKER');
+  });
+
+  it('naming a SHARED/polymorphic method does not spare the siblings (uniqueness-aware)', async () => {
+    // `intercept` is implemented by every interceptor (5 defs) — a polymorphic name,
+    // not a unique one. Naming it must NOT keep all five full (that floods the budget
+    // — Django's `as_sql`×110). The off-spine siblings still collapse, and since none
+    // defines the supertype, `intercept` doesn't even earn a body — pure skeleton.
+    const result = await handler.execute('codegraph_explore', { query: `${QUERY} intercept`, maxFiles: 12 });
+    const text = result.content?.[0]?.text ?? '';
+
+    const bridge = sectionFor(text, 'bridge-interceptor.ts');
+    expect(bridge, 'a sibling named only via a shared method is not spared').toContain(SKELETON_MARK);
+    expect(bridge, 'a shared method does not earn a body in a non-supertype leaf').not.toContain('BRIDGE_BODY_MARKER');
   });
 });

@@ -29,6 +29,33 @@ source.
 > its budget; it is now an *override* of the named-callable spare. The
 > single-condition history below is kept for context.
 
+> **Further refinement (2026-05-29) — per-symbol focused view + named-cluster
+> survival.** Whole-file skeleton/spare was still too coarse on a real Django
+> A/B: the agent Read back `compiler.py` (collapsed → its `execute_sql`/`as_sql`
+> bodies elided) and `query.py` (a non-sibling god-file whose `_fetch_all` cluster
+> got trimmed). Four changes took both repos from ~9–10% to **~14–17% cheaper**
+> with **median 0 reads**:
+> 1. **Uniqueness-aware spare** — only a (near-)UNIQUE named callable spares a
+>    file. `as_sql` has **110 defs** across every Compiler/Expression subclass;
+>    naming it must not keep every backend variant full (it was flooding Django's
+>    budget). `getResponseWithInterceptorChain` (1 def) still spares RealCall.
+> 2. **Per-symbol focused view** — a collapsed family file shows the **full body**
+>    of on-spine / unique-named / canonical-base-supertype methods and only
+>    **signatures** for the rest. So `SQLCompiler.execute_sql`/`as_sql` survive
+>    while the 80 other symbols + redundant subclasses collapse → no Read-back.
+> 3. **Test-file exclusion on all tiers** — a test file (`custom_lookups/tests.py`)
+>    was eating 2.3 KB of Django's 28 KB budget; tests rarely answer an
+>    architecture question. (Previously only the <500-file tiers excluded them.)
+> 4. **Named-cluster survival in non-sibling files** — inject agent-named method
+>    defs into a file's clusters even when the gather missed them, rank them at
+>    importance 9, and cap cluster selection at `min(per-file, remaining-total)`
+>    so high-importance named clusters survive instead of being source-order
+>    trimmed (Django's `_fetch_all`, L2237, the last of four big files emitted).
+> Controls held: OkHttp 14% cheaper / 0 RealCall read-backs; Excalidraw 31%
+> cheaper / 0 reads (god-file clustering unaffected — its big file is emitted
+> first, so the budget cap never binds it). OkHttp's interceptors stay a pure
+> signature skeleton (no named callable in them, don't define a supertype).
+
 ---
 
 ## TL;DR

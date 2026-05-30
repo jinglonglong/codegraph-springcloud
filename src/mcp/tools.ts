@@ -1924,8 +1924,8 @@ export class ToolHandler {
    * whose qualifiedName contains another named token (`PmsProductServiceImpl::list`),
    * dropping unrelated `OmsOrderService::list`.
    */
-  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string> } {
-    const EMPTY = { text: '', pathNodeIds: new Set<string>(), namedNodeIds: new Set<string>() };
+  private buildFlowFromNamedSymbols(cg: CodeGraph, query: string): { text: string; pathNodeIds: Set<string>; namedNodeIds: Set<string>; uniqueNamedNodeIds: Set<string> } {
+    const EMPTY = { text: '', pathNodeIds: new Set<string>(), namedNodeIds: new Set<string>(), uniqueNamedNodeIds: new Set<string>() };
     try {
       const CALLABLE = new Set(['method', 'function', 'component', 'constructor']);
       // Strip only a REAL file extension (Create.cs → Create); KEEP qualified
@@ -1945,18 +1945,28 @@ export class ToolHandler {
       const segPool = new Set<string>();
       for (const t of tokens) for (const s of t.toLowerCase().split(/::|\./)) if (s) segPool.add(s);
       const named = new Map<string, Node>();
+      // Nodes whose token is SPECIFIC — a (near-)unique callable name (<=3 defs in
+      // the whole graph). These are safe to SPARE a file on: the agent named THIS
+      // method (`getResponseWithInterceptorChain`, 1 def). A hyper-polymorphic name
+      // (`as_sql`, 110 defs across every Expression/Compiler subclass) is NOT here,
+      // so naming it doesn't keep every backend variant full and flood the budget.
+      const uniqueNamedNodeIds = new Set<string>();
       for (const t of tokens) {
         const cands = this.findAllSymbols(cg, t).nodes.filter((n) => CALLABLE.has(n.kind));
         // A qualified or otherwise-specific name (<=3 hits) keeps all; an
         // ambiguous simple name keeps only candidates whose container is named.
-        const pick = cands.length <= 3
+        const specific = cands.length <= 3;
+        const pick = specific
           ? cands
           : cands.filter((n) => {
               const segs = (n.qualifiedName || '').toLowerCase().split(/::|\./).filter(Boolean);
               const container = segs.length >= 2 ? segs[segs.length - 2] : '';
               return !!container && segPool.has(container);
             });
-        for (const n of pick.slice(0, 6)) named.set(n.id, n);
+        for (const n of pick.slice(0, 6)) {
+          named.set(n.id, n);
+          if (specific) uniqueNamedNodeIds.add(n.id);
+        }
         if (named.size > 40) break;
       }
       if (named.size < 2) return EMPTY;
@@ -2004,7 +2014,7 @@ export class ToolHandler {
       // must keep full source even if it's an off-spine polymorphic sibling — the
       // agent named `getResponseWithInterceptorChain` / `SQLCompiler.execute_sql`
       // as the mechanism, not as an interchangeable leaf. See the skeleton gate.
-      return { text: out.join('\n'), pathNodeIds: new Set(best.map((s) => s.node.id)), namedNodeIds: new Set(named.keys()) };
+      return { text: out.join('\n'), pathNodeIds: new Set(best.map((s) => s.node.id)), namedNodeIds: new Set(named.keys()), uniqueNamedNodeIds };
     } catch {
       return EMPTY;
     }
@@ -2141,20 +2151,18 @@ export class ToolHandler {
       );
     };
 
-    // Tiny-tier hard-exclude: on small projects (`excludeLowValueFiles`
-    // budget flag), one slipped test/spec file dominates the per-file budget
-    // (cobra's `command_test.go` displaced `args.go` and contributed ~10KB of
-    // pure noise to "How does cobra parse commands?"). The sort-step
-    // deprioritization isn't enough at small N. Skip the hard-exclude when
-    // the query itself is about tests — that's the legitimate "explore the
-    // tests" case where the agent does want them.
-    if (budget.excludeLowValueFiles) {
+    // Hard-exclude test/spec files (ALL tiers, not just tiny). One slipped test
+    // file dominates the per-file budget on small repos (cobra's `command_test.go`
+    // displaced `args.go`) AND wastes budget on large ones (Django's
+    // `custom_lookups/tests.py` ate ~2.3 KB of the 28 KB cap, crowding out the
+    // SQLCompiler mechanism the agent then Read). A test file almost never answers
+    // an architecture question. Skip when the query itself is about tests — the
+    // legitimate "explore the tests" case — and only cut if ≥2 non-test candidates
+    // remain (else tests are the only signal for this area).
+    {
       const queryMentionsTests = /\b(test|tests|testing|spec|verify|verifies)\b/i.test(query);
       if (!queryMentionsTests) {
         const nonLow = relevantFiles.filter(([p]) => !isLowValue(p));
-        // Only apply the hard-filter if we still have at least 2 non-test
-        // candidates after the cut — otherwise the agent is asking about an
-        // area where tests are the only signal, and we should not strip them.
         if (nonLow.length >= 2) {
           relevantFiles = nonLow;
         }
@@ -2322,49 +2330,90 @@ export class ToolHandler {
       const fileLines = fileContent.split('\n');
       const lang = group.nodes[0]?.language || '';
 
-      // Adaptive sizing (CODEGRAPH_ADAPTIVE_EXPLORE, default on): skeletonize a file
-      // (member signatures, bodies elided) when it is a redundant member of a
-      // polymorphic family. Skeletonize iff ALL hold:
+      // Adaptive sizing (CODEGRAPH_ADAPTIVE_EXPLORE, default on): collapse a file
+      // to a per-symbol view when it's a redundant member of a polymorphic family.
+      // Engages iff ALL hold:
       //   1. a flow spine exists,
       //   2. no symbol in the file is on that spine (it's not the mechanism path),
       //   3. it IS a polymorphic sibling (≥ MIN_SIBLINGS impls of a shared supertype),
-      //   4. it is NOT SPARED, where a file is spared iff the agent NAMED a callable
-      //      in it (`getResponseWithInterceptorChain` → keep RealCall.kt full so the
-      //      agent doesn't Read it back) UNLESS the file also DEFINES the family's
-      //      supertype — a base+subclasses "family" file (Django's compiler.py) is
-      //      huge and Read-anyway, so skeletonizing it FREES budget for the sibling
-      //      files the agent would otherwise Read (it's the cheaper option, proven by
-      //      A/B: sparing compiler.py cost MORE and Read MORE).
-      // Before condition 4, off-spine + sibling alone skeletonized RealCall.kt (it
-      // implements the 9-impl `Lockable` mixin), which the agent then Read back.
-      const namedInFile = group.nodes.some(n => flow.namedNodeIds.has(n.id));
-      const spared = namedInFile && !definesPolymorphicSupertype(group.nodes);
+      //   4. it is NOT SPARED, where a file is spared iff the agent named a
+      //      (near-)UNIQUE callable in it (`getResponseWithInterceptorChain`, 1 def →
+      //      keep RealCall.kt full) UNLESS the file DEFINES the family supertype (a
+      //      base+subclasses "family" file like Django's compiler.py — collapse it).
+      //      Uniqueness matters: `as_sql` has 110 defs across every Compiler/Expression
+      //      subclass; naming it must NOT keep every backend variant + test file full
+      //      and flood the budget. That's why the spare reads uniqueNamedNodeIds.
+      // Within a collapsed file the render is PER-SYMBOL (condition B): a method the
+      // agent NAMED or that's on the spine is shown with its FULL body (so the agent
+      // doesn't Read the file back for it — Django's SQLCompiler.execute_sql/as_sql);
+      // every other symbol is just its signature. So the base mechanism survives while
+      // the file's other ~80 symbols + the redundant subclasses collapse to one line each.
+      const spareNamed = group.nodes.some(n => flow.uniqueNamedNodeIds.has(n.id));
+      const fileDefinesSuper = definesPolymorphicSupertype(group.nodes);
+      const spared = spareNamed && !fileDefinesSuper;
       if (adaptiveExploreEnabled() && flow.pathNodeIds.size > 0
           && !group.nodes.some(n => flow.pathNodeIds.has(n.id))
           && isPolymorphicSibling(group.nodes)
           && !spared) {
+        const CALLABLE_BODY = new Set(['method', 'function', 'constructor', 'component']);
         const syms = group.nodes
           .filter(n => n.kind !== 'import' && n.kind !== 'export' && n.startLine > 0)
           .sort((a, b) => a.startLine - b.startLine);
-        const seenLn = new Set<number>();
-        const skel: string[] = [];
-        for (const n of syms) {
-          // node.startLine can point at a decorator/annotation (@Throws, @Override,
-          // @objc), so scan forward a few lines for the line that actually NAMES the
-          // symbol — that's the signature the agent needs from a skeleton.
-          let lineNo = n.startLine;
-          for (let k = 0; k < 4; k++) {
-            if ((fileLines[n.startLine - 1 + k] || '').includes(n.name)) { lineNo = n.startLine + k; break; }
-          }
-          if (seenLn.has(lineNo)) continue;
-          seenLn.add(lineNo);
-          const sig = (fileLines[lineNo - 1] || '').trim();
-          if (sig) skel.push(exploreLineNumbersEnabled() ? `${lineNo}\t${sig}` : sig);
+        // Pass 1: choose which symbols get a FULL body, by priority, greedily within
+        // a per-file body cap — so one huge family file can't body every named method
+        // and crowd out the other flow files (Django's query.py). A symbol earns a
+        // body if it's on-spine, or UNIQUELY named (`SQLCompiler.execute_sql`), or a
+        // co-named method WHEN this file DEFINES the family supertype (so the base
+        // `SQLCompiler.as_sql` body shows, but the 110 leaf `as_sql` overrides — and
+        // OkHttp's 5 `intercept`s if the agent names `intercept` — stay signatures).
+        const prio = (n: Node) => !CALLABLE_BODY.has(n.kind) ? 99
+          : flow.pathNodeIds.has(n.id) ? 0
+          : flow.uniqueNamedNodeIds.has(n.id) ? 1
+          : (fileDefinesSuper && flow.namedNodeIds.has(n.id)) ? 2 : 99;
+        const bodyCap = budget.maxCharsPerFile * 2;
+        const bodyIds = new Set<string>();
+        let bodyChars = 0;
+        for (const n of syms.filter(n => prio(n) < 99 && n.endLine >= n.startLine).sort((a, b) => prio(a) - prio(b))) {
+          const sz = fileLines.slice(n.startLine - 1, Math.min(n.endLine, n.startLine + 220)).join('\n').length;
+          if (bodyChars + sz > bodyCap && bodyIds.size > 0) continue;
+          bodyIds.add(n.id);
+          bodyChars += sz;
         }
+        // Pass 2: render in line order — full body for chosen symbols, else the
+        // signature line (capped, with a "+N more" tail so the structure map of a
+        // god-file doesn't itself bloat the budget).
+        const skel: string[] = [];
+        let coveredUntil = 0; // skip symbols already inside an emitted body
+        let sigCount = 0, sigDropped = 0;
+        const SIG_MAX = Math.max(12, budget.maxSymbolsInFileHeader * 2);
+        for (const n of syms) {
+          if (n.startLine <= coveredUntil) continue;
+          if (bodyIds.has(n.id)) {
+            const end = Math.min(n.endLine, n.startLine + 220);
+            const body = fileLines.slice(n.startLine - 1, end).join('\n');
+            skel.push(exploreLineNumbersEnabled() ? numberSourceLines(body, n.startLine) : body);
+            coveredUntil = end;
+          } else {
+            // Elide the body, emit the signature. node.startLine can point at a
+            // decorator/annotation, so scan forward for the line that names the symbol.
+            let lineNo = n.startLine;
+            for (let k = 0; k < 4; k++) {
+              if ((fileLines[n.startLine - 1 + k] || '').includes(n.name)) { lineNo = n.startLine + k; break; }
+            }
+            if (lineNo <= coveredUntil) continue;
+            if (sigCount >= SIG_MAX) { sigDropped++; continue; }
+            const sig = (fileLines[lineNo - 1] || '').trim();
+            if (sig) { skel.push(exploreLineNumbersEnabled() ? `${lineNo}\t${sig}` : sig); sigCount++; }
+          }
+        }
+        if (sigDropped > 0) skel.push(`… +${sigDropped} more (signatures elided)`);
         if (skel.length > 0) {
           const names = [...new Set(group.nodes.filter(n => n.kind !== 'import' && n.kind !== 'export').map(n => n.name))]
             .slice(0, budget.maxSymbolsInFileHeader).join(', ');
-          lines.push(`#### ${filePath} — ${names} · skeleton (signatures only; Read for a full body)`, '', '```' + lang, skel.join('\n'), '```', '');
+          const tag = bodyIds.size > 0
+            ? 'focused (the methods you named in full, the rest as signatures; Read for more)'
+            : 'skeleton (signatures only; Read for a full body)';
+          lines.push(`#### ${filePath} — ${names} · ${tag}`, '', '```' + lang, skel.join('\n'), '```', '');
           totalChars += skel.join('\n').length + 120;
           filesIncluded++;
           continue;
@@ -2423,13 +2472,27 @@ export class ToolHandler {
       // Alamofire is the canonical case: the `Session` class spans ~1,400
       // lines). We want the granular symbols inside, not the envelope.
       const ENVELOPE_KINDS = new Set(['file', 'module', 'class', 'struct', 'interface', 'enum', 'namespace', 'protocol', 'trait', 'component']);
-      const ranges: Array<{ start: number; end: number; name: string; kind: string; importance: number }> = group.nodes
-        .filter(n => n.startLine > 0 && n.endLine > 0)
+      // Cluster from this file's gathered nodes PLUS any callable the agent NAMED that
+      // lives here. Explore's relevance gather can miss a named method def in a huge
+      // non-sibling file — Django's query.py is 3,040 lines and `_fetch_all` (L2237)
+      // was gathered only as call-reference edges, never as a def, so it formed no
+      // cluster and the agent Read it back. Inject named defs directly and rank them
+      // ABOVE connected/glue nodes (importance 9) so their cluster wins the per-file
+      // budget — the agent explicitly asked for these symbols.
+      const rangeNodes = new Map<string, Node>();
+      for (const n of group.nodes) if (n.startLine > 0 && n.endLine > 0) rangeNodes.set(n.id, n);
+      for (const id of flow.namedNodeIds) {
+        if (rangeNodes.has(id)) continue;
+        const n = cg.getNode(id);
+        if (n && n.filePath === filePath && n.startLine > 0 && n.endLine > 0) rangeNodes.set(id, n);
+      }
+      const ranges: Array<{ start: number; end: number; name: string; kind: string; importance: number }> = [...rangeNodes.values()]
         // Drop whole-file envelope nodes (containers covering >50% of the file).
         .filter(n => !(ENVELOPE_KINDS.has(n.kind) && (n.endLine - n.startLine + 1) > fileLines.length * 0.5))
         .map(n => {
           let importance = 1;
           if (entryNodeIds.has(n.id)) importance = 10;
+          else if (flow.namedNodeIds.has(n.id)) importance = 9; // agent named it → keep its cluster
           else if (glueNodeIds.has(n.id)) importance = 6; // bridging caller/callee of an entry
           else if (connectedToEntry.has(n.id)) importance = 3;
           return { start: n.startLine, end: n.endLine, name: n.name, kind: n.kind, importance };
@@ -2529,6 +2592,13 @@ export class ToolHandler {
           return a.span - b.span;
         });
 
+      // Per-file budget is the SMALLER of the per-file cap and what's left of the
+      // total output cap — so selection (which ranks by importance) keeps the
+      // high-importance clusters and drops peripheral ones, instead of the
+      // downstream source-order trim slicing off whatever comes last in the file.
+      // That source-order slice is what cut Django's `_fetch_all` (L2237, importance
+      // 9 — agent-named) when query.py was the last of four big files to be emitted.
+      const fileBudget = Math.min(budget.maxCharsPerFile, Math.max(0, budget.maxOutputChars - totalChars - 200));
       const chosenIndices = new Set<number>();
       let projectedChars = 0;
       for (const rc of rankedClusters) {
@@ -2541,7 +2611,7 @@ export class ToolHandler {
           projectedChars += sectionLen;
           continue;
         }
-        if (projectedChars + sectionLen > budget.maxCharsPerFile) continue;
+        if (projectedChars + sectionLen > fileBudget) continue;
         chosenIndices.add(rc.idx);
         projectedChars += sectionLen;
       }

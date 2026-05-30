@@ -4,7 +4,7 @@
 
 ### Supercharge Claude Code, Cursor, Codex, OpenCode, Hermes Agent, Gemini, Antigravity, and Kiro with Semantic Code Intelligence
 
-**~22% cheaper · ~50% fewer tool calls · 100% local**
+**~25% cheaper · ~62% fewer tool calls · 100% local**
 
 ### [Documentation & Website →](https://colbymchenry.github.io/codegraph/)
 
@@ -83,21 +83,21 @@ When Claude Code explores a codebase, it spawns **Explore agents** that scan fil
 
 ### Benchmark Results
 
-Tested across **7 real-world open-source codebases** spanning 7 languages, comparing an agent (Claude Code, headless) answering one architecture question **with** and **without** CodeGraph. Each cell is the savings at the **median of 4 runs per arm**. _Re-validated on Opus 4.8 (2026-05-29), on the build with adaptive `codegraph_explore` sizing._
+Tested across **7 real-world open-source codebases** spanning 7 languages, comparing an agent (Claude Code, headless) answering one architecture question **with** and **without** CodeGraph. Each cell is the savings at the **median of 4 runs per arm**. _Re-validated on Opus 4.8 (2026-05-29), on the build with per-symbol adaptive `codegraph_explore` sizing._
 
-> **Average: 22% cheaper · 47% fewer tokens · 20% faster · 50% fewer tool calls**
+> **Average: 25% cheaper · 57% fewer tokens · 23% faster · 62% fewer tool calls**
 
 | Codebase | Language | Cost | Tokens | Time | Tool calls |
 |----------|----------|------|--------|------|------------|
-| **VS Code** | TypeScript · ~10k files | 13% cheaper | 63% fewer | 11% faster | 82% fewer |
-| **Excalidraw** | TypeScript · ~640 | 40% cheaper | 71% fewer | 51% faster | 82% fewer |
-| **Django** | Python · ~3k | 9% cheaper | 35% fewer | 7% faster | 38% fewer |
-| **Tokio** | Rust · ~790 | 31% cheaper | 59% fewer | 29% faster | 61% fewer |
-| **OkHttp** | Java · ~645 | 4% cheaper | 16% fewer | 11% faster | 40% fewer |
-| **Gin** | Go · ~110 | 28% cheaper | 40% fewer | 25% faster | 35% fewer |
-| **Alamofire** | Swift · ~110 | 32% cheaper | 43% fewer | 6% faster | 13% fewer |
+| **VS Code** | TypeScript · ~10k files | 33% cheaper | 70% fewer | 27% faster | 80% fewer |
+| **Excalidraw** | TypeScript · ~640 | 27% cheaper | 61% fewer | 26% faster | 70% fewer |
+| **Django** | Python · ~3k | 23% cheaper | 70% fewer | 28% faster | 77% fewer |
+| **Tokio** | Rust · ~790 | 35% cheaper | 70% fewer | 37% faster | 79% fewer |
+| **OkHttp** | Java · ~645 | 11% cheaper | 48% fewer | 26% faster | 70% fewer |
+| **Gin** | Go · ~110 | 15% cheaper | 35% fewer | 9% faster | 47% fewer |
+| **Alamofire** | Swift · ~110 | 28% cheaper | 46% fewer | 7% faster | 13% fewer |
 
-CodeGraph cuts **tool calls and total tokens on every repo** and answers large repos with **zero file reads**, while the no-CodeGraph agent spends its budget on grep/find/Read discovery. **Every repo is now cheaper, not just faster** — the two former cost outliers (Django and OkHttp, where the answer spans many interchangeable implementations of one interface) flipped from *costlier* than native search to cheaper once adaptive `codegraph_explore` sizing stopped shipping every sibling's full body. The margin is still narrowest on the smallest repos, where a modern model's native search is already cheap, but it stays positive across the board; the largest wins remain fewer tool calls and faster answers.
+CodeGraph cuts **cost, tokens, tool calls, and time on every repo** — across small, medium, and large codebases — and answers most of them with **zero file reads**, while the no-CodeGraph agent spends its budget on grep/find/Read discovery. `codegraph_explore` shows the answer in full — the mechanism plus the exact methods you asked about, even when they're buried in a multi-thousand-line file — while collapsing redundant interchangeable implementations to signatures, so the response is sized to the *answer* rather than the file count. The cost margin is narrowest on the smallest repos, where a modern model's native search is already cheap, but it stays solidly positive across the board.
 
 <details>
 <summary><strong>Per-repo breakdown — WITH vs WITHOUT (median of 4)</strong></summary>
@@ -105,79 +105,79 @@ CodeGraph cuts **tool calls and total tokens on every repo** and answers large r
 **VS Code** · ~10k files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 58s | 2m 13s | 11% faster |
-| File Reads | 0 | 8 | −8 |
-| Grep/Bash | 0 | 9 | −9 |
-| Tool calls | 3 | 17 | 82% fewer |
-| Total tokens | 607k | 1.65M | 63% fewer |
-| Cost | $0.66 | $0.76 | 13% cheaper |
+| Time | 1m 37s | 2m 13s | 27% faster |
+| File Reads | 0 | 9 | −9 |
+| Grep/Bash | 0 | 11 | −11 |
+| Tool calls | 4 | 21 | 80% fewer |
+| Total tokens | 545k | 1.79M | 70% fewer |
+| Cost | $0.55 | $0.83 | 33% cheaper |
 
 **Excalidraw** · ~640 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 23s | 2m 48s | 51% faster |
-| File Reads | 0 | 11 | −11 |
-| Grep/Bash | 0 | 9 | −9 |
-| Tool calls | 4 | 20 | 82% fewer |
-| Total tokens | 596k | 2.06M | 71% fewer |
-| Cost | $0.53 | $0.89 | 40% cheaper |
+| Time | 1m 34s | 2m 6s | 26% faster |
+| File Reads | 0 | 7 | −7 |
+| Grep/Bash | 0 | 8 | −8 |
+| Tool calls | 5 | 15 | 70% fewer |
+| Total tokens | 651k | 1.69M | 61% fewer |
+| Cost | $0.57 | $0.78 | 27% cheaper |
 
 **Django** · ~3k files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 43s | 1m 51s | 7% faster |
-| File Reads | 5 | 10 | −5 |
-| Grep/Bash | 0 | 4 | −4 |
-| Tool calls | 8 | 13 | 38% fewer |
-| Total tokens | 752k | 1.16M | 35% fewer |
-| Cost | $0.56 | $0.62 | 9% cheaper |
+| Time | 1m 25s | 1m 58s | 28% faster |
+| File Reads | 0 | 9 | −9 |
+| Grep/Bash | 0 | 5 | −5 |
+| Tool calls | 3 | 13 | 77% fewer |
+| Total tokens | 419k | 1.41M | 70% fewer |
+| Cost | $0.48 | $0.62 | 23% cheaper |
 
 **Tokio** · ~790 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 2m 3s | 2m 53s | 29% faster |
-| File Reads | 3 | 9 | −6 |
-| Grep/Bash | 0 | 7 | −7 |
-| Tool calls | 7 | 17 | 61% fewer |
-| Total tokens | 869k | 2.14M | 59% fewer |
-| Cost | $0.63 | $0.92 | 31% cheaper |
+| Time | 1m 28s | 2m 20s | 37% faster |
+| File Reads | 0 | 8 | −8 |
+| Grep/Bash | 0 | 6 | −6 |
+| Tool calls | 3 | 14 | 79% fewer |
+| Total tokens | 522k | 1.73M | 70% fewer |
+| Cost | $0.53 | $0.82 | 35% cheaper |
 
 **OkHttp** · ~645 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 18s | 1m 27s | 11% faster |
-| File Reads | 2 | 4 | −2 |
-| Grep/Bash | 0 | 4 | −4 |
-| Tool calls | 5 | 8 | 40% fewer |
-| Total tokens | 739k | 883k | 16% fewer |
-| Cost | $0.54 | $0.56 | 4% cheaper |
+| Time | 1m 6s | 1m 29s | 26% faster |
+| File Reads | 1 | 4 | −3 |
+| Grep/Bash | 0 | 6 | −6 |
+| Tool calls | 3 | 10 | 70% fewer |
+| Total tokens | 572k | 1.10M | 48% fewer |
+| Cost | $0.48 | $0.55 | 11% cheaper |
 
 **Gin** · ~110 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 8s | 1m 30s | 25% faster |
-| File Reads | 0 | 3 | −3 |
-| Grep/Bash | 0 | 5 | −5 |
-| Tool calls | 6 | 9 | 35% fewer |
-| Total tokens | 532k | 887k | 40% fewer |
-| Cost | $0.36 | $0.50 | 28% cheaper |
+| Time | 1m 28s | 1m 37s | 9% faster |
+| File Reads | 0 | 6 | −6 |
+| Grep/Bash | 0 | 2 | −2 |
+| Tool calls | 5 | 9 | 47% fewer |
+| Total tokens | 552k | 847k | 35% fewer |
+| Cost | $0.48 | $0.57 | 15% cheaper |
 
 **Alamofire** · ~110 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 2m 19s | 2m 28s | 6% faster |
-| File Reads | 5 | 9 | −4 |
-| Grep/Bash | 1 | 4 | −3 |
+| Time | 2m 11s | 2m 21s | 7% faster |
+| File Reads | 3 | 9 | −6 |
+| Grep/Bash | 2 | 4 | −2 |
 | Tool calls | 11 | 12 | 13% fewer |
-| Total tokens | 1.22M | 2.14M | 43% fewer |
-| Cost | $0.71 | $1.04 | 32% cheaper |
+| Total tokens | 1.13M | 2.10M | 46% fewer |
+| Cost | $0.69 | $0.95 | 28% cheaper |
 
 </details>
 
 <details>
 <summary><strong>Full benchmark details</strong></summary>
 
-**Methodology.** Each arm is `claude -p` (Claude Opus 4.8) run headlessly against the repo with `--strict-mcp-config`: **WITH** = CodeGraph's MCP server enabled, **WITHOUT** = an empty MCP config. Built-in Read/Grep/Bash stay available to both. Same question per repo, **4 runs per arm, median reported**. Cost = the run's `total_cost_usd`; Tokens = total tokens processed (input incl. cached + output); Time = wall-clock; Tool calls = every tool invocation, including those inside any sub-agents the model spawns. Repos cloned at `--depth 1` and indexed by the same CodeGraph build that served them. Re-validated 2026-05-29 on the build with adaptive `codegraph_explore` sizing. These numbers are lower than the prior Opus 4.7 validation — not a CodeGraph regression but a stronger native baseline: Opus 4.8 greps/reads efficiently on the main thread instead of fanning out into large Explore-subagent sweeps, so the no-CodeGraph arm is leaner than it used to be. Per-repo numbers move run-to-run with how hard the without-arm thrashes (the median-of-4 smooths it, but tails remain — e.g. Django's without-arm hit $2.71/14m one batch).
+**Methodology.** Each arm is `claude -p` (Claude Opus 4.8) run headlessly against the repo with `--strict-mcp-config`: **WITH** = CodeGraph's MCP server enabled, **WITHOUT** = an empty MCP config. Built-in Read/Grep/Bash stay available to both. Same question per repo, **4 runs per arm, median reported**. Cost = the run's `total_cost_usd`; Tokens = total tokens processed (input incl. cached + output); Time = wall-clock; Tool calls = every tool invocation, including those inside any sub-agents the model spawns. Repos cloned at `--depth 1` and indexed by the same CodeGraph build that served them. Re-validated 2026-05-29 on the build with per-symbol adaptive `codegraph_explore` sizing. These numbers are lower than the prior Opus 4.7 validation — not a CodeGraph regression but a stronger native baseline: Opus 4.8 greps/reads efficiently on the main thread instead of fanning out into large Explore-subagent sweeps, so the no-CodeGraph arm is leaner than it used to be. Per-repo numbers move run-to-run with how hard the without-arm thrashes (the median-of-4 smooths it, but tails remain — e.g. Django's without-arm hit $2.71/14m one batch).
 
 **Queries:**
 | Codebase | Query |
