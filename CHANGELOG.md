@@ -9,6 +9,9 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+
+## [0.9.8] - 2026-06-01
+
 ### New Features
 
 - `codegraph init` now builds the initial index by default — you no longer need the `-i`/`--index` flag (it's still accepted, so existing commands and scripts keep working). (#483)
@@ -248,3 +251,4 @@ Thanks @andreinknv for the substantive draft this release was based on.
 [0.7.9]: https://github.com/colbymchenry/codegraph/releases/tag/v0.7.9
 [0.7.7]: https://github.com/colbymchenry/codegraph/releases/tag/v0.7.7
 [0.7.6]: https://github.com/colbymchenry/codegraph/releases/tag/v0.7.6
+[0.9.8]: https://github.com/colbymchenry/codegraph/releases/tag/v0.9.8
