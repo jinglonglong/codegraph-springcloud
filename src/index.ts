@@ -682,6 +682,15 @@ export class CodeGraph {
   }
 
   /**
+   * Get ALL nodes with an exact name (direct index lookup, not FTS-ranked/capped).
+   * Used to enumerate every overload of a heavily-overloaded name so the specific
+   * definition the caller wants is never dropped below a search cut.
+   */
+  getNodesByName(name: string): Node[] {
+    return this.queries.getNodesByName(name);
+  }
+
+  /**
    * Search nodes by text
    */
   searchNodes(query: string, options?: SearchOptions): SearchResult[] {
@@ -692,7 +701,7 @@ export class CodeGraph {
    * Find the project's "primary route file" — the file with the densest
    * concentration of framework-emitted `route` nodes (≥3 routes, ≥30%
    * of all non-test routes). Used to inline the routing config in
-   * `codegraph_context` responses on small realworld template repos
+   * `codegraph_explore` responses on small realworld template repos
    * (rails-realworld, laravel-realworld, drupal-admintoolbar, …) where
    * Glob+Read of `routes.rb`/`urls.py`/etc. otherwise beats codegraph.
    */
