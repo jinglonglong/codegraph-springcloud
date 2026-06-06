@@ -138,6 +138,14 @@ export interface LanguageExtractor {
   isStatic?: (node: SyntaxNode) => boolean;
   /** Check if variable declaration is a constant (const vs let/var) */
   isConst?: (node: SyntaxNode) => boolean;
+  /**
+   * Extract extra symbol-level modifier keywords to persist on the node's
+   * `decorators` list (e.g. Kotlin `expect`/`actual` multiplatform markers).
+   * Called generically for every created node; return undefined/[] when none.
+   * Used by the resolver to link `expect` declarations to their `actual`
+   * implementations across source sets.
+   */
+  extractModifiers?: (node: SyntaxNode) => string[] | undefined;
 
   // --- New config properties ---
 
