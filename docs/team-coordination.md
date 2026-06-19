@@ -4,6 +4,63 @@
 
 ---
 
+## Team A — Foundation / CodeGraph Integration
+
+**Status**: ✅ Phase 1 + Phase 2 complete (all 15 tasks)
+
+### Deliverables
+
+| Package | Purpose | Ready for |
+|---|---|---|
+| `@colbymchenry/springkg-shared` | TypeScript interfaces (`Resolver`, `SpringKgNode`, `SpringKgEdge`, `SPRINGKG_CONFIG`) | Teams B/C/D/F import from here |
+| `@colbymchenry/springkg-core` | `SpringKg` orchestrator, `SpringDatabase`, migration runner, `SummaryGenerator` | Teams B/C/D/F register resolvers here |
+| `@colbymchenry/springkg-installer` | `springkg install` / `springkg uninstall` CLI for Claude/Cursor/opencode | Team E extends with real implementations |
+| `@colbymchenry/springkg-cli` | CLI binary (`springkg` command) | Team E adds `init`/`index`/`status` commands |
+
+### How to register a resolver
+
+```typescript
+import { SpringKg } from '@colbymchenry/springkg-core';
+import type { Resolver } from '@colbymchenry/springkg-shared';
+
+const sk = await SpringKg.init({ projectPath: '/path/to/project' });
+sk.registerResolver({
+  name: 'my-resolver',
+  emitsKinds: ['controller', 'service'],
+  enhance: async (input) => {
+    // input.codegraphNodes, input.codegraphEdges, input.changedFiles, input.cg
+    return { symbolsAdded: 5, edgesAdded: 3, byKind: { controller: 2, service: 3 } };
+  },
+});
+```
+
+### Key files
+
+- Resolver contract: `packages/springkg-shared/src/index.ts` (interfaces: `Resolver`, `SpringKgEnhanceInput`, `SpringKgEnhanceOutput`)
+- Config + chain order: `SPRINGKG_CONFIG.resolverChain` in `packages/springkg-shared/src/index.ts`
+- DB schema: `packages/springkg-core/src/db/schema.sql` (8 tables, confidence columns)
+- Orchestrator: `packages/springkg-core/src/spring-kg.ts` (`SpringKg.init/open/registerResolver/enhanceOnSync`)
+
+### Resolver execution order (SPRINGKG_CONFIG.resolverChain)
+
+1. **Team B (semantic)**: `annotation-engine` → `endpoint-resolver` → `feign-resolver` → `feign-provider-bridge` → `feign-request-response-type`
+2. **Team D (runtime)**: `config-resolver` → `middleware-inventory` → `nacos-config-resolver` → `config-property-usage-tracker` → `gateway-route-resolver`
+3. **Team C (data)**: `mybatis-xml-extractor` → `annotation-sql-extractor` → `sql-table-column` → `mapper-binding` → `mybatis-plus`
+4. **Team F (community)**: `community-builder`
+
+### Stage isolation
+
+- If ALL resolvers in a stage fail, subsequent stages are SKIPPED.
+- If a single resolver within a stage fails, siblings continue normally.
+
+### Tests
+
+- 8 tests passing, 1 skipped (Windows-gated) — `npx vitest run __tests__/team-a/`
+
+### Tag
+
+- `v0.1.0-springkg-foundation` on commit `ce059a0` (main branch)
+
 ## Team C — Data Access / MyBatis / SQL
 
 **Status**: ✅ Sprint 2 implementation complete
