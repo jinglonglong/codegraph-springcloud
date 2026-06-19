@@ -17,6 +17,15 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Swift top-level `let`s and `static let` constants (including those namespaced in an `enum`/`struct`, the common Swift pattern) are now indexed as constants and participate in the constant-reader impact analysis above — change a `static let defaultRetryLimit` or an `enum Constants { static let … }` and the same-file code that reads it shows up as affected. Computed properties and per-instance `let`s are not treated as constants.
 - Dart top-level `const`/`final` and class `static const`/`static final` constants are now indexed as constants and participate in the constant-reader impact analysis above. Instance fields, `var`s, and locals are not treated as constants. (Generated Dart code with the standard `.g.dart`/`.freezed.dart`/`.pb.dart` suffixes is already skipped.)
 
+### New Features (springkg)
+
+- SpringKg: Added SpringCloud semantic knowledge graph layer with 8-table schema in `springkg.db` (`spring_symbols`, `spring_edges`, `spring_endpoints`, `spring_feign_clients`, `spring_sql_statements`, `runtime_config_properties`, `feature_communities`, `feature_community_members`).
+- SpringKg: Added 4 MCP tools (`spring_find_entry`, `spring_find_feign`, `spring_assets_overview`, `spring_trace_flow`) for querying Spring Boot assets and tracing request flows.
+- SpringKg: Added 5 Team B semantic resolvers (AnnotationSemanticEngine, EndpointResolver, FeignResolver, FeignProviderBridge, FeignRequestResponseType) for Spring annotations, REST endpoints, and OpenFeign client resolution.
+- SpringKg: Added 5 Team C data resolvers (MyBatisXmlExtractor, AnnotationSqlExtractor, SqlTableColumnExtractor, MapperBindingResolver, MyBatisPlusResolver) for MyBatis XML/annotation SQL and JPA entity mapping.
+- SpringKg: Added 5 Team D runtime resolvers (ConfigResolver, MiddlewareInventory, NacosConfigResolver, ConfigPropertyUsageTracker, GatewayRouteResolver) for application.yml properties, middleware chains, Nacos config, and gateway routes.
+- SpringKg: Added `SpringKg` orchestrator class with watcher bridge to CodeGraph and staged resolver chain execution.
+
 ### Fixes
 
 - `codegraph index` now rebuilds the full graph from scratch, so it produces the same result as a fresh `codegraph init` instead of reporting "0 nodes, 0 edges" and looking like it wiped your index. Previously, re-running `index` on an unchanged project skipped every file (their contents hadn't changed) and showed an empty-looking summary; it now clears and re-indexes for an honest, complete rebuild every time. Use `codegraph sync` for fast incremental updates between full rebuilds. Thanks @Arc-univer. (#874)
