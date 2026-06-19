@@ -1,0 +1,544 @@
+# CodeGraph Source Analysis
+
+## 1. Database Schema
+
+CodeGraph stores its knowledge graph in a SQLite database (`.codegraph/codegraph.db`). The schema consists of five core tables, a virtual FTS5 table for full-text search, supporting indices, and trigger-based synchronization.
+
+---
+
+### 1.1 Core Tables
+
+#### `schema_versions`
+
+Tracks the database schema version history for migration purposes.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `version` | INTEGER PRIMARY KEY | Schema version number |
+| `applied_at` | INTEGER NOT NULL | Unix timestamp (milliseconds) when the version was applied |
+| `description` | TEXT | Human-readable description of the schema version |
+
+Initial version is 1, applied at installation time with the description "Initial schema".
+
+---
+
+#### `nodes`
+
+Stores every code symbol extracted from the source codebase: functions, classes, methods, variables, interfaces, routes, components, and all other supported `NodeKind` values.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT PRIMARY KEY | Unique node identifier. Format: `${kind}:${sha256truncated_32chars}` (see Section 1.4) |
+| `kind` | TEXT NOT NULL | Node kind such as `function`, `class`, `method`, `interface`, `route`, `component` |
+| `name` | TEXT NOT NULL | Symbol name as it appears in source |
+| `qualified_name` | TEXT NOT NULL | Fully qualified name including namespace/module path |
+| `file_path` | TEXT NOT NULL | Absolute or project-relative path to the source file |
+| `language` | TEXT NOT NULL | Source language (e.g., `typescript`, `python`, `java`) |
+| `start_line` | INTEGER NOT NULL | 1-based line number where the symbol definition begins |
+| `end_line` | INTEGER NOT NULL | 1-based line number where the symbol definition ends |
+| `start_column` | INTEGER NOT NULL | 0-based column where the symbol begins |
+| `end_column` | INTEGER NOT NULL | 0-based column where the symbol ends |
+| `docstring` | TEXT | Optional docstring or JSDoc comment |
+| `signature` | TEXT | Function/method signature including parameters |
+| `visibility` | TEXT | Visibility modifier: `public`, `private`, `protected`, `internal` |
+| `is_exported` | INTEGER DEFAULT 0 | 1 if the symbol is exported from its module |
+| `is_async` | INTEGER DEFAULT 0 | 1 if the function is async |
+| `is_static` | INTEGER DEFAULT 0 | 1 if the member is static |
+| `is_abstract` | INTEGER DEFAULT 0 | 1 if the class/method is abstract |
+| `decorators` | TEXT | JSON array of decorator/annotation names |
+| `type_parameters` | TEXT | JSON array of generic type parameters |
+| `return_type` | TEXT | Normalized return type name |
+| `updated_at` | INTEGER NOT NULL | Unix timestamp (ms) of last update |
+
+Indices on `nodes`:
+
+- `idx_nodes_kind` — for filtering by node kind
+- `idx_nodes_name` — for exact name lookups
+- `idx_nodes_qualified_name` — for fully-qualified name lookups
+- `idx_nodes_file_path` — for listing all symbols in a file
+- `idx_nodes_language` — for filtering by language
+- `idx_nodes_file_line` — composite index on `(file_path, start_line)` for file-ordered symbol retrieval
+- `idx_nodes_lower_name` — expression index on `lower(name)` for case-insensitive name lookups
+
+---
+
+#### `edges`
+
+Stores relationships between nodes: calls, imports, extends, implements, references, type annotations, and all other supported `EdgeKind` values.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Unique edge identifier |
+| `source` | TEXT NOT NULL | Node ID of the edge origin (the caller, importer, etc.) |
+| `target` | TEXT NOT NULL | Node ID of the edge destination (the definition being referenced) |
+| `kind` | TEXT NOT NULL | Edge kind such as `calls`, `imports`, `extends`, `implements`, `references`, `returns`, `instantiates`, `overrides`, `decorates` |
+| `metadata` | TEXT | JSON object with additional edge metadata (e.g., synthesizedBy channel name for heuristic edges) |
+| `line` | INTEGER | Source code line where this edge was detected |
+| `col` | INTEGER | Source code column where this edge was detected |
+| `provenance` | TEXT DEFAULT NULL | Provenance tag. Set to `'heuristic'` for synthesized edges (e.g., Swift-ObjC bridge, React render synthesis). NULL for statically extracted edges. |
+
+Foreign key constraints on `source` and `target` reference `nodes(id)` with `ON DELETE CASCADE`.
+
+Indices on `edges`:
+
+- `idx_edges_kind` — for filtering by edge kind
+- `idx_edges_source_kind` — composite index on `(source, kind)` for efficient outgoing-edge queries by kind
+- `idx_edges_target_kind` — composite index on `(target, kind)` for efficient incoming-edge queries by kind
+- `idx_edges_provenance` — for filtering heuristic/synthesized edges
+
+Note: Single-column `idx_edges_source` and `idx_edges_target` indexes are intentionally omitted. The composite indexes `(source, kind)` and `(target, kind)` support source-only and target-only lookups via SQLite's left-prefix scan, avoiding redundant write amplification.
+
+---
+
+#### `files`
+
+Tracks every source file that has been indexed.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `path` | TEXT PRIMARY KEY | File path as stored in the index |
+| `content_hash` | TEXT NOT NULL | SHA-256 hash of the file content at last indexing |
+| `language` | TEXT NOT NULL | Detected or specified language |
+| `size` | INTEGER NOT NULL | File size in bytes at last indexing |
+| `modified_at` | INTEGER NOT NULL | File system mtime at last indexing |
+| `indexed_at` | INTEGER NOT NULL | Unix timestamp (ms) when the file was last indexed |
+| `node_count` | INTEGER DEFAULT 0 | Number of nodes extracted from this file |
+| `errors` | TEXT | JSON array of extraction errors or warnings |
+
+Indices on `files`:
+
+- `idx_files_language` — for listing files by language
+- `idx_files_modified_at` — for identifying recently modified files
+
+---
+
+#### `unresolved_refs`
+
+Stores reference resolution candidates that require a second-pass resolution after full indexing is complete. Used when a reference name could match multiple candidates or when the target has not yet been indexed.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT | Unique identifier |
+| `from_node_id` | TEXT NOT NULL | Node ID of the referencing symbol |
+| `reference_name` | TEXT NOT NULL | The unresolved symbol name as it appears in source |
+| `reference_kind` | TEXT NOT NULL | The expected node kind of the target |
+| `line` | INTEGER NOT NULL | Source line of the unresolved reference |
+| `col` | INTEGER NOT NULL | Source column of the unresolved reference |
+| `candidates` | TEXT | JSON array of candidate node IDs (pre-computed possibilities) |
+| `file_path` | TEXT NOT NULL DEFAULT '' | Path to the file containing the reference |
+| `language` | TEXT NOT NULL DEFAULT 'unknown' | Source language of the reference |
+
+Foreign key constraint on `from_node_id` references `nodes(id)` with `ON DELETE CASCADE`.
+
+Indices on `unresolved_refs`:
+
+- `idx_unresolved_from_node` — for finding all unresolved refs originating from a node
+- `idx_unresolved_name` — for resolving references by name
+- `idx_unresolved_file_path` — for processing references within specific files
+- `idx_unresolved_from_name` — composite index on `(from_node_id, reference_name)`
+
+---
+
+#### `project_metadata`
+
+Key-value store for version and provenance tracking of the project index.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | TEXT PRIMARY KEY | Metadata key |
+| `value` | TEXT NOT NULL | Metadata value |
+| `updated_at` | INTEGER NOT NULL | Unix timestamp (ms) of last update |
+
+Used to store project-level facts such as the last indexed commit hash, branch name, or any other per-project metadata needed for cache invalidation or audit.
+
+---
+
+### 1.2 FTS5 Virtual Table: `nodes_fts`
+
+CodeGraph provides full-text search over all indexed symbols via a virtual FTS5 table.
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    id,
+    name,
+    qualified_name,
+    docstring,
+    signature,
+    content='nodes',
+    content_rowid='rowid'
+);
+```
+
+The FTS table is backed by the `nodes` table (`content='nodes'`). It indexes five columns:
+
+| FTS Column | Source Column | Weight |
+|------------|---------------|--------|
+| `id` | `id` | 0 (unused in scoring) |
+| `name` | `name` | 20 (highest — name matches dominate) |
+| `qualified_name` | `qualified_name` | 5 |
+| `docstring` | `docstring` | 1 |
+| `signature` | `signature` | 2 |
+
+The high weight on `name` ensures that exact or prefix matches on the symbol name rank above incidental mentions in docstrings or qualified names of unrelated symbols.
+
+### 1.3 FTS Triggers
+
+Three triggers keep the FTS index synchronized with the `nodes` table automatically:
+
+**`nodes_ai` (After Insert)**
+Fires on INSERT. Inserts the new row's data into the FTS index.
+
+```sql
+CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+    INSERT INTO nodes_fts(rowid, id, name, qualified_name, docstring, signature)
+    VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.docstring, NEW.signature);
+END;
+```
+
+**`nodes_ad` (After Delete)**
+Fires on DELETE. Marks the old row as deleted in the FTS index.
+
+```sql
+CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, docstring, signature)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.docstring, OLD.signature);
+END;
+```
+
+**`nodes_au` (After Update)**
+Fires on UPDATE. Removes the old FTS entry and inserts the new one (FTS5 does not support in-place updates).
+
+```sql
+CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, name, qualified_name, docstring, signature)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.name, OLD.qualified_name, OLD.docstring, OLD.signature);
+    INSERT INTO nodes_fts(rowid, id, name, qualified_name, docstring, signature)
+    VALUES (NEW.rowid, NEW.id, NEW.name, NEW.qualified_name, NEW.docstring, NEW.signature);
+END;
+```
+
+These triggers make the FTS index always consistent with the `nodes` table without requiring manual synchronization in application code.
+
+### 1.4 Node ID Format and springkg Integration
+
+Every node in the graph carries a stable, globally unique identifier with two components:
+
+```
+${kind}:${sha256truncated_32chars}
+```
+
+- **`kind`** — the node kind string (e.g., `function`, `class`, `method`, `route`, `component`)
+- **`sha256truncated_32chars`** — the first 32 hex characters (128 bits) of the SHA-256 hash of a stable input derived from the symbol's definition: typically the concatenation of `qualified_name`, `file_path`, `start_line`, and `start_column`. The truncation to 32 characters keeps IDs compact while retaining sufficient collision resistance across a large codebase.
+
+**Example node IDs:**
+
+```
+function:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
+class:e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+method:9f8e7d6c5b4a3f8e7d6c5b4a3f8e7d6c
+route:3a2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d
+```
+
+#### Integration with springkg
+
+In springkg (the Spring Knowledge Graph project), the `codegraph_node_id` field on any node entity uses this same format to create a direct, resolvable link from a springkg node to its originating CodeGraph symbol.
+
+**Mapping strategy:**
+
+1. When springkg imports or references a CodeGraph node, it stores the full `codegraph_node_id` string as the `codegraph_node_id` property on its own domain node.
+2. To resolve the link, springkg parses the `codegraph_node_id` into its two components:
+   - Extract `kind` to understand the symbol type
+   - Use `sha256truncated_32chars` to verify or look up the node in CodeGraph's `nodes` table via `SELECT * FROM nodes WHERE id = '${kind}:${sha256truncated_32chars}'`
+3. Optionally, springkg can use the `kind` prefix as a first-pass filter before attempting the full ID lookup.
+
+**Example springkg entity definition:**
+
+```json
+{
+  "id": "springkg:spring-service-UserService",
+  "type": "SpringService",
+  "codegraph_node_id": "class:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+  "name": "UserService",
+  "springkg_metadata": {
+    "framework": "spring-boot",
+    "layer": "service"
+  }
+}
+```
+
+This scheme provides:
+
+- **Uniqueness** — the 128-bit hash component makes collisions vanishingly unlikely even across multiple projects
+- **Verifiability** — springkg can confirm a CodeGraph node still exists and has not been invalidated
+- **Provenance** — the `kind` prefix tells springkg the symbol type without requiring a lookup
+- **Stability** — the hash is derived from position+name, so the ID remains stable across re-indexing unless the symbol itself moves or is renamed
+
+---
+
+### 1.5 QueryBuilder Method Mapping
+
+The `QueryBuilder` class in `src/db/queries.ts` wraps all database operations. The following table maps each QueryBuilder method to the schema elements it primarily operates on.
+
+| QueryBuilder Method | Primary Schema Elements |
+|---------------------|------------------------|
+| `insertNode` / `insertNodes` | `nodes` table |
+| `updateNode` | `nodes` table |
+| `deleteNode` | `nodes` table |
+| `deleteNodesByFile` | `nodes` table |
+| `getNodeById` | `nodes` table (primary key) |
+| `getNodesByIds` | `nodes` table (primary key, batched IN query) |
+| `getNodesByFile` | `nodes` table + `idx_nodes_file_path` |
+| `getNodesByKind` | `nodes` table + `idx_nodes_kind` |
+| `getNodesByName` | `nodes` table + `idx_nodes_name` |
+| `getNodesByQualifiedNameExact` | `nodes` table + `idx_nodes_qualified_name` |
+| `getNodesByLowerName` | `nodes` table + `idx_nodes_lower_name` |
+| `getAllNodes` | `nodes` table (full scan) |
+| `searchNodes` | `nodes_fts` FTS5 + `nodes` table |
+| `searchNodesFTS` | `nodes_fts` FTS5 (prefix match, BM25 scoring) |
+| `searchNodesLike` | `nodes` table (LIKE substring match) |
+| `searchNodesFuzzy` | `nodes` table (bounded edit distance) |
+| `findNodesByExactName` | `nodes` table + `idx_nodes_name` |
+| `findNodesByNameSubstring` | `nodes` table (LIKE) |
+| `insertEdge` / `insertEdges` | `edges` table |
+| `deleteEdgesBySource` | `edges` table |
+| `deleteEdgesByTarget` | `edges` table |
+| `getOutgoingEdges` | `edges` table + `idx_edges_source_kind` |
+| `getIncomingEdges` | `edges` table + `idx_edges_target_kind` |
+| `findEdgesBetweenNodes` | `edges` table (JSON set intersection) |
+| `getDependentFilePaths` | `edges` + `nodes` (join on target file) |
+| `getDependencyFilePaths` | `edges` + `nodes` (join on source file) |
+| `upsertFile` / `insertFile` | `files` table |
+| `updateFile` | `files` table |
+| `deleteFile` | `files` + `nodes` (transactional, cascades) |
+| `getFileByPath` | `files` table (primary key) |
+| `getAllFiles` | `files` table |
+| `getStaleFiles` | `files` table (hash comparison) |
+| `getLastIndexedAt` | `files` table (MAX aggregate) |
+| `insertUnresolvedRef` / `insertUnresolvedRefsBatch` | `unresolved_refs` table |
+| `deleteUnresolvedByNode` | `unresolved_refs` table + `idx_unresolved_from_node` |
+| `getUnresolvedByName` | `unresolved_refs` table + `idx_unresolved_name` |
+| `getUnresolvedReferences` | `unresolved_refs` table |
+| `getUnresolvedReferencesCount` | `unresolved_refs` table (COUNT) |
+| `getUnresolvedReferencesBatch` | `unresolved_refs` table (LIMIT/OFFSET) |
+| `getUnresolvedReferencesByFiles` | `unresolved_refs` table + `idx_unresolved_file_path` |
+| `clearUnresolvedReferences` | `unresolved_refs` table |
+| `deleteResolvedReferences` | `unresolved_refs` table (IN query) |
+| `deleteSpecificResolvedReferences` | `unresolved_refs` table (tuple match) |
+| `getMetadata` | `project_metadata` table |
+| `setMetadata` | `project_metadata` table (upsert) |
+| `getAllMetadata` | `project_metadata` table |
+| `getDominantFile` | `edges` + `nodes` (file edge-density aggregation) |
+| `getTopRouteFile` | `nodes` table + `idx_nodes_kind` (route nodes) |
+| `getRoutingManifest` | `nodes` + `edges` (route-to-handler join) |
+| `getNodeAndEdgeCount` | `nodes` + `edges` (COUNT aggregates) |
+| `getStats` | `nodes` + `edges` + `files` (multi-aggregate) |
+| `clear` | `unresolved_refs` + `edges` + `nodes` + `files` (transactional DELETE) |
+
+The QueryBuilder uses prepared statements for all hot paths and an LRU node cache (max 1000 entries) to accelerate repeated lookups of the same node ID.
+
+---
+
+## 2. Java Extractor
+
+The Java extractor is defined in `src/extraction/languages/java.ts` and wired into the general `TreeSitterExtractor` in `src/extraction/tree-sitter.ts`. It handles all JVM source files (`.java`; Kotlin uses the same resolver but has its own extractor).
+
+### 2.1 AST Node to NodeKind Mapping
+
+The extractor declares which tree-sitter node types correspond to each `NodeKind`. The mapping is read by `TreeSitterExtractor.visitNode` and dispatched to the appropriate `extract*` private method.
+
+| tree-sitter node type | CodeGraph NodeKind | Notes |
+|---|---|---|
+| `class_declaration` | `class` | Regular class definitions |
+| `method_declaration` | `method` | Instance and static methods inside classes |
+| `constructor_declaration` | `method` | Java constructors, treated as `method` kind |
+| `field_declaration` | `field` or `constant` | `static final` fields become `constant` (see §2.3); others are `field` |
+| `interface_declaration` | `interface` | Plain Java interfaces |
+| `annotation_type_declaration` | `interface` | `@interface Foo { … }` — annotation type definitions. Without this, annotation type nodes (`@SerializedName`, `@GetMapping`, JPA/Spring annotations) are invisible and every `@Foo` usage shows zero dependents |
+| `enum_declaration` | `enum` | Java enums |
+| `enum_constant` | `enum_member` | Individual enum constants |
+| `import_declaration` | `import` | `import` statements, resolved to target module |
+| `method_invocation` | (call edge only) | Method calls; produces a `calls` edge, not a node |
+| `local_variable_declaration` | `variable` | Local variables inside method bodies |
+| `package_declaration` | (namespace node) | Creates an implicit `namespace` node wrapping top-level declarations, giving them a fully qualified name |
+
+The extractor also declares the field names used to navigate each node type:
+
+```typescript
+{
+  nameField: 'name',        // field holding the symbol's simple name
+  bodyField: 'body',        // field holding the class/method body block
+  paramsField: 'parameters', // field holding method parameters
+  returnField: 'type',      // field holding the return type annotation
+}
+```
+
+### 2.2 Return Type Normalization
+
+`extractJavaReturnType` (java.ts, line 25) reads the `type` field of a `method_declaration` or `constructor_declaration` and normalizes it for the `return_type` column in the `nodes` table. The normalization:
+
+1. Skips primitives and `void` — these cannot be the receiver of a chained call, so they return `undefined` (no `return_type` stored).
+2. Skips array types (`Foo[]`) — same reasoning.
+3. Strips generic type arguments: `List<Foo>` becomes `List`.
+4. Strips a dotted package qualifier: `java.util.List` becomes `List`.
+5. Validates the result is a valid identifier before returning it.
+
+```typescript
+// java.ts
+function extractJavaReturnType(node: SyntaxNode, source: string): string | undefined {
+  const typeNode = getChildByField(node, 'type');
+  if (!typeNode) return undefined;
+  if (JAVA_NON_CLASS_RETURN_NODES.has(typeNode.type)) return undefined;
+  if (typeNode.type === 'array_type') return undefined;
+  const raw = getNodeText(typeNode, source).trim().replace(/<[^>]*>/g, '');
+  const last = raw.split('.').pop()?.trim();
+  if (!last || !/^[A-Za-z_]\w*$/.test(last)) return undefined;
+  return last;
+}
+```
+
+### 2.3 Constant vs Field: `static final` Detection
+
+Java `static final` fields are stored as `constant` kind so that value-reference edges can target them. Instance fields and `final`-only or `static`-only fields stay as `field` kind. The `isConst` predicate checks for both `static` and `final` modifiers in the `modifiers` child:
+
+```typescript
+// java.ts
+isConst: (node) => {
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child?.type === 'modifiers') {
+      const text = child.text;
+      return /\bstatic\b/.test(text) && /\bfinal\b/.test(text);
+    }
+  }
+  return false;
+}
+```
+
+### 2.4 Visibility Modifier Extraction
+
+The `getVisibility` function scans the `modifiers` child for `public`, `private`, or `protected` and returns the first match (in that priority order). If no modifier is found the field is absent from the node — Java defaults to package-private.
+
+### 2.5 `extractDecoratorsFor`: Annotation/Decorator Extraction
+
+`extractDecoratorsFor` (tree-sitter.ts, line 3540) is called from every symbol-creating extractor — `extractClass`, `extractMethod`, `extractProperty`, `extractField`, `extractFunction` — immediately after `createNode`. It finds all decorator/annotation nodes that precede or belong to the declaration and emits an unresolved reference of kind `decorates` for each one.
+
+#### What node types are considered decorators
+
+The function accepts four tree-sitter node types as decorators:
+
+```typescript
+if (
+  n.type !== 'decorator' &&        // TypeScript / Python
+  n.type !== 'annotation' &&        // Java/Kotlin (with args)
+  n.type !== 'marker_annotation' && // Java (no args: @Override, @Deprecated)
+  n.type !== 'attribute'           // Swift attributes
+) {
+  return;
+}
+```
+
+#### How the decorator name is extracted
+
+1. If the decorator has a `call_expression` child (e.g. `@GetMapping("/users")` or `@Autowired(required=false)`), the function is resolved from the `call_expression`'s `function` field.
+2. Otherwise, the first named child of one of these types is used: `identifier`, `member_expression`, `scoped_identifier`, `navigation_expression`, `user_type` (Swift), `type_identifier`.
+3. The name text is extracted, then cleaned:
+   - Generic type arguments are stripped: `@Argument<T>` becomes `Argument`.
+   - Everything before the last `.` or `::` is stripped: `org.example.MyAnno` becomes `MyAnno`.
+
+```typescript
+let name = getNodeText(target, this.source);
+const lt = name.indexOf('<'); // strip generic args
+if (lt > 0) name = name.slice(0, lt);
+const lastDot = Math.max(name.lastIndexOf('.'), name.lastIndexOf('::'));
+if (lastDot >= 0) name = name.slice(lastDot + 1).replace(/^[:.]/, '');
+name = name.trim();
+```
+
+#### Where decorators are searched
+
+The function searches two locations:
+
+1. **Direct named children of the declaration node** — covers method/property decorators and also descends through a `modifiers` child (Java/Kotlin/C# put annotations inside `modifiers: @MyAnno public class X`).
+2. **Preceding siblings of the declaration inside its parent** — covers TypeScript class style where `@Decorator class Foo {}` parses as `export_statement` with the `decorator` as a sibling before the `class_declaration`. The scan walks backwards and stops at the first non-decorator node, preventing decorators from an earlier unrelated declaration from leaking onto the next one.
+
+#### Output: `decorates` unresolved reference
+
+For each decorator found, one unresolved reference is pushed:
+
+```typescript
+this.unresolvedReferences.push({
+  fromNodeId: decoratedId,   // the node that carries the decorator
+  referenceName: name,       // e.g. "GetMapping", "Autowired"
+  referenceKind: 'decorates',
+  line: n.startPosition.row + 1,
+  column: n.startPosition.column,
+});
+```
+
+The `decorates` reference kind is resolved by the reference resolver. This is how `@RestController` on a class links to the `interface` node for `RestController` (the annotation type definition), giving the annotation type dependents in the graph.
+
+#### `decorators` column on nodes
+
+In addition to emitting a `decorates` edge, the decorator names are also stored as a JSON array in the `decorators` column on the node itself. This is done by `createNode` (tree-sitter.ts, line 1157), which merges in any `extractModifiers` result from the language extractor:
+
+```typescript
+const mods = this.extractor?.extractModifiers?.(node);
+if (mods && mods.length > 0) {
+  newNode.decorators = [...(newNode.decorators ?? []), ...mods];
+}
+```
+
+The Java extractor does not define `extractModifiers`, so the `decorators` column for Java nodes is populated exclusively through the `decorates` unresolved reference mechanism.
+
+### 2.6 Spring Annotation Detection and Route Emission
+
+Spring Boot support lives in `src/resolution/frameworks/java.ts` via the `springResolver`. The resolver has two phases: detection and extraction.
+
+#### Framework Detection
+
+`springResolver.detect` checks three signals to determine if a project uses Spring:
+
+1. `pom.xml` contains `spring-boot` or `springframework`
+2. `build.gradle` or `build.gradle.kts` contains `spring-boot` or `springframework`
+3. Any `.java` file contains `@SpringBootApplication`, `@RestController`, `@Service`, or `@Repository`
+
+If any signal is present, the resolver is active for this project.
+
+#### Route Node Extraction
+
+The `springResolver.extract` function runs on every `.java` and `.kt` file. It uses regex on the raw file content (stripped of comments) to find Spring MVC mapping annotations and emit `route` nodes:
+
+**Method-level HTTP verb annotations** (line 219):
+```regex
+@(GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping)\b\s*(\([^)]*\))?
+```
+
+For each match:
+- The HTTP verb is inferred from the annotation name (`GetMapping` → `GET`, etc.)
+- The path argument is parsed from `parseMappingPath` (strips `value=`, `path=`, quotes)
+- A `route` node is created with `kind='route'`, `name='GET /users'`, `qualifiedName='...::route:/users'`
+- A `references` edge is emitted from the route node to the method it decorates (found by scanning the next 600 characters after the annotation for a method signature)
+
+**Class-level `@RequestMapping` prefix** (line 212):
+```regex
+@RequestMapping\s*\(([^)]*)\)\s*(?:@[\w.]+(?:\([^)]*\))?\s*)*(?:public\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*class\b
+```
+
+When a class-level `@RequestMapping` is found, its path argument is saved as `classPrefix` and prepended to all method-level paths via `joinPath`.
+
+**Method-level `@RequestMapping`** (line 261) handles the older style `@RequestMapping(value="/x", method=RequestMethod.GET)`. It is skipped when the annotation appears before the `class` keyword (to avoid double-counting the class-level prefix).
+
+#### Spring Configuration Binding
+
+`extractSpringValueBindings` (line 416) finds `@Value("${key}")` and `@ConfigurationProperties(prefix="...")` annotations and creates references from the annotated field/method to the corresponding `constant` nodes emitted from `extractSpringConfig` for `application.yml` / `application.properties` files. Resolution uses Spring's relaxed binding rules (kebab-case, camelCase, snake_case all map to the same canonical lowercase key).
+
+### 2.7 Key Implementation Notes
+
+- The `annotation_type_declaration` entry in `interfaceTypes` is deliberate and important: without it, annotation type definitions (e.g. `@interface MyAnno`) are not extracted as interface nodes, so all usages of `@MyAnno` show zero dependents.
+- The `JAVA_NON_CLASS_RETURN_NODES` set (line 10) prevents primitives from being stored as `return_type` on nodes. This matters because `return_type` is used in the call-graph traverser to find receivers — a primitive return type has no callable methods, so it should not participate in that traversal.
+- The `modifiers` child of a Java declaration is descended by `extractDecoratorsFor` specifically because Java places annotations inside it. If the function only scanned direct children, every annotation on a Java class/method/field would be silently dropped.
+- The backward-walking sibling scan in `extractDecoratorsFor` uses `startIndex` equality (not object identity) to locate the declaration in its parent's child list — the tree-sitter web bindings return fresh wrapper objects from `parent`/`namedChild` navigation, making `===` unreliable.
+
+---
+
+
