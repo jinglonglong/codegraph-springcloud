@@ -421,7 +421,7 @@ Team G 是 7 团队并行模式中的 1 个，负责**验证 + 示例 + 文档**
     - Tool: Bash
     - Steps: `ls examples/springcloud-demo/src/main/java/com/example/user/`
 
-- [ ] 11. [G] T36 — Sprint 2 e2e + 文档
+- [x] 11. [G] T36 — Sprint 2 e2e + 文档
 
   **What to do**:
   - `tests/integration/sprint2-e2e.test.ts`：
