@@ -12,10 +12,13 @@
     "scripts",
     "README.md"
   ],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "tsc && npm run copy-assets && node -e \"require('fs').chmodSync('dist/bin/codegraph.js', 0o755)\"",
     "preuninstall": "node dist/bin/uninstall.js",
-    "copy-assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/db',{recursive:true});fs.copyFileSync('src/db/schema.sql','dist/db/schema.sql');fs.mkdirSync('dist/extraction/wasm',{recursive:true});fs.readdirSync('src/extraction/wasm').filter(f=>f.endsWith('.wasm')).forEach(f=>fs.copyFileSync('src/extraction/wasm/'+f,'dist/extraction/wasm/'+f))\"",
+    "copy-assets": "node -e \"const fs=require('fs'),path=require('path');fs.mkdirSync('dist/db',{recursive:true});fs.copyFileSync('src/db/schema.sql','dist/db/schema.sql');fs.mkdirSync('dist/extraction/wasm',{recursive:true});fs.readdirSync('src/extraction/wasm').filter(f=>f.endsWith('.wasm')).forEach(f=>fs.copyFileSync('src/extraction/wasm/'+f,'dist/extraction/wasm/'+f));const copyDir=(src,dst)=>{if(!fs.existsSync(src))return;fs.mkdirSync(dst,{recursive:true});for(const e of fs.readdirSync(src,{withFileTypes:true})){const s=path.join(src,e.name),d=path.join(dst,e.name);if(e.isDirectory())copyDir(s,d);else fs.copyFileSync(s,d);}};copyDir('src/web/public','dist/web/public')\"",
     "dev": "tsc --watch",
     "cli": "npm run build && node dist/bin/codegraph.js",
     "test": "vitest run",
@@ -23,8 +26,11 @@
     "test:eval": "vitest run __tests__/evaluation/",
     "eval": "npm run build && npx tsx __tests__/evaluation/runner.ts",
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\"",
-    "build:monorepo": "tsc -b packages/springkg-shared packages/springkg-core packages/springkg-installer",
-    "test:team-a": "vitest run __tests__/team-a"
+    "build:springkg": "tsc -b packages/springkg-shared packages/springkg-core packages/springkg-installer",
+    "test:springkg": "vitest run __tests__/team-a"
+  },
+  "peerDependencies": {
+    "@colbymchenry/codegraph": ">=0.9.0 <1.0.0"
   },
   "keywords": [
     "code-intelligence",
@@ -54,9 +60,5 @@
   },
   "engines": {
     "node": ">=20.0.0 <25.0.0"
-  },
-  "workspaces": ["packages/*"],
-  "peerDependencies": {
-    "@colbymchenry/codegraph": ">=0.9.0 <1.0.0"
   }
 }
