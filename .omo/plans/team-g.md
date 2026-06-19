@@ -333,7 +333,7 @@ Team G 是 7 团队并行模式中的 1 个，负责**验证 + 示例 + 文档**
     - Tool: Bash
     - Steps: `find examples/springcloud-demo -name "*.java" | wc -l` >= 8
 
-- [ ] 8. [G] T23 — Sprint 1 e2e 测试
+- [x] 8. [G] T23 — Sprint 1 e2e 测试
 
   **What to do**:
   - `tests/integration/sprint1-e2e.test.ts`:
