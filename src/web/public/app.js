@@ -1,5 +1,5 @@
 /* ============================================================================
- * CodeGraph — Local Web UI (front-end)
+ * SpringKG — Local Web UI (front-end)
  * Plain JS, no frameworks, no build step. Cytoscape.js v3.x loaded from CDN.
  *
  * API CONTRACT  (server binds to 127.0.0.1:4000 by default, base path /)
@@ -307,6 +307,7 @@
     activeKindFilter: null,
     activeDecoratorFilter: null,
     lastQuery: '',
+    suggestionIdx: -1,
     kinds: { nodeKindColors: {}, edgeKindColors: {} },
     status: null,
     browsePath: null,
@@ -645,14 +646,47 @@
   // ──────────────────────────────────────────────────────────────────────────
   // Search (debounced 250ms, cap 50 results in dropdown)
   // ──────────────────────────────────────────────────────────────────────────
+  function positionSuggestions() {
+    const input = $('#search-input');
+    const suggest = $('#search-suggestions');
+    if (!input || !suggest || suggest.hidden) return;
+    const r = input.getBoundingClientRect();
+    suggest.style.top = (r.bottom + 4) + 'px';
+    suggest.style.left = r.left + 'px';
+    suggest.style.width = r.width + 'px';
+  }
+  function showSuggestions() {
+    const suggest = $('#search-suggestions');
+    if (!suggest) return;
+    positionSuggestions();
+    suggest.hidden = false;
+  }
+  function hideSuggestions() {
+    const suggest = $('#search-suggestions');
+    if (suggest) suggest.hidden = true;
+    state.suggestionIdx = -1;
+    $$('#search-suggestions .result').forEach((el) => el.classList.remove('suggestion-active'));
+  }
+  function highlightSuggestion(i) {
+    const items = $$('#search-suggestions .result');
+    if (!items.length) { state.suggestionIdx = -1; return; }
+    if (i < 0) i = 0;
+    if (i >= items.length) i = items.length - 1;
+    items.forEach((el, idx) => el.classList.toggle('suggestion-active', idx === i));
+    if (items[i] && items[i].scrollIntoView) items[i].scrollIntoView({ block: 'nearest' });
+    state.suggestionIdx = i;
+  }
+
   async function runSearch(q) {
     state.lastQuery = q;
-    const results = $('#results');
+    const suggest = $('#search-suggestions');
     const q2 = (q || '').trim();
+    if (!suggest) return;
+    clear(suggest);
+    state.suggestionIdx = -1;
 
     if (!q2) {
-      clear(results);
-      results.appendChild(el('div', 'results-empty', '输入关键词开始搜索…'));
+      hideSuggestions();
       return;
     }
     try {
@@ -662,9 +696,10 @@
       appendFilterParams(params);
       const data = await apiFetch('/api/search?' + params.toString());
 
-      clear(results);
+      clear(suggest);
       if (!data.results || !data.results.length) {
-        results.appendChild(el('div', 'results-empty', `没有匹配“${q2}”的结果。`));
+        suggest.appendChild(el('div', 'suggestion-empty', `没有匹配"${q2}"的结果。`));
+        showSuggestions();
         return;
       }
 
@@ -690,13 +725,20 @@
         if (r.node.startLine != null) locParts.push(':' + r.node.startLine);
         row.appendChild(el('div', 'result-loc', locParts.join('') || '—'));
 
-        row.addEventListener('click', () => focusNode(r.node.id));
+        row.addEventListener('click', () => {
+          focusNode(r.node.id);
+          hideSuggestions();
+        });
         frag.appendChild(row);
       });
-      results.appendChild(frag);
+      suggest.appendChild(frag);
+      state.suggestionIdx = 0;
+      highlightSuggestion(0);
+      showSuggestions();
     } catch (err) {
-      clear(results);
-      results.appendChild(el('div', 'results-empty', `搜索失败：${err.message}`));
+      clear(suggest);
+      suggest.appendChild(el('div', 'suggestion-empty', `搜索失败：${err.message}`));
+      showSuggestions();
       showToast(err.message || '搜索失败', 'error', '接口错误');
     }
   }
@@ -769,7 +811,7 @@
       runSearch('');
       await refreshStats();
       await loadOverview();
-      showToast('已切换到新的 CodeGraph 索引。', 'ok', '加载完成');
+      showToast('已切换到新的 SpringKG 索引。', 'ok', '加载完成');
     } catch (err) {
       showToast(err.message || '切换项目失败', 'error', '加载失败');
     } finally {
@@ -837,7 +879,7 @@
       const meta = entry.isCodeGraphDir
         ? '.codegraph 索引目录'
         : entry.isCodeGraphProject
-          ? 'CodeGraph 项目根目录'
+          ? 'SpringKG 项目根目录'
           : '目录';
       list.appendChild(createBrowseRow(entry.name, entry.path, meta, loadable));
     });
@@ -1311,7 +1353,7 @@
     const tip = $('#tooltip');
 
     state.cy.on('tap', 'node', function (evt) {
-      selectNode(evt.target.id());
+      focusNode(evt.target.id());
     });
 
     state.cy.on('mouseover', 'node', function (evt) {
@@ -1876,7 +1918,67 @@
 
     $('#search-input').addEventListener('input', (e) => debouncedSearch(e.target.value));
     $('#search-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.target.value = ''; runSearch(''); e.target.blur(); }
+      if (e.key === 'Escape') {
+        hideSuggestions();
+        e.target.value = '';
+        runSearch('');
+        e.target.blur();
+        return;
+      }
+      const suggest = $('#search-suggestions');
+      if (!suggest || suggest.hidden) return;
+      const items = $$('#search-suggestions .result');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        highlightSuggestion(state.suggestionIdx < 0 ? 0 : Math.min(items.length - 1, state.suggestionIdx + 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        highlightSuggestion(state.suggestionIdx < 0 ? items.length - 1 : Math.max(0, state.suggestionIdx - 1));
+      } else if (e.key === 'Enter') {
+        if (state.suggestionIdx >= 0 && items[state.suggestionIdx]) {
+          e.preventDefault();
+          items[state.suggestionIdx].click();
+        }
+      }
+    });
+
+    // Click outside the search input wrap closes the suggestions dropdown.
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.search-input-wrap')) hideSuggestions();
+    });
+    // Reposition the fixed dropdown on scroll/resize so it stays under the input.
+    const repositionIfOpen = () => {
+      const s = $('#search-suggestions');
+      if (s && !s.hidden) positionSuggestions();
+    };
+    window.addEventListener('scroll', repositionIfOpen, { passive: true });
+    window.addEventListener('resize', repositionIfOpen);
+    document.addEventListener('scroll', repositionIfOpen, { passive: true, capture: true });
+
+    // Filter section collapse/expand — per-section state persisted in localStorage
+    // so the user's preferred panel layout survives reloads.
+    const FILTER_COLLAPSED_KEY = 'codegraph-filter-collapsed';
+    function getFilterCollapsed() {
+      try { return JSON.parse(localStorage.getItem(FILTER_COLLAPSED_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveFilterCollapsed(id, collapsed) {
+      const state = getFilterCollapsed();
+      if (collapsed) state[id] = true; else delete state[id];
+      try { localStorage.setItem(FILTER_COLLAPSED_KEY, JSON.stringify(state)); } catch {}
+    }
+    const _collapsedState = getFilterCollapsed();
+    $$('.filter-section-label').forEach((label) => {
+      const section = label.closest('.filter-section');
+      if (!section) return;
+      if (_collapsedState[section.id]) {
+        section.classList.add('collapsed');
+        label.setAttribute('aria-expanded', 'false');
+      }
+      label.addEventListener('click', () => {
+        const isCollapsed = section.classList.toggle('collapsed');
+        label.setAttribute('aria-expanded', String(!isCollapsed));
+        saveFilterCollapsed(section.id, isCollapsed);
+      });
     });
 
     $('#color-by-select').addEventListener('change', (e) => {
