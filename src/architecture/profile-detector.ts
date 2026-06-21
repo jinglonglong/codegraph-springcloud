@@ -7,6 +7,14 @@ import {
 } from './types';
 import { profileRegistry } from './profile-registry';
 import { FacetEngine } from './facet-engine';
+// Side-effect import: registers the built-in spring-cloud and generic profiles
+// (and their facets) with the singleton registries when the detector module
+// is first loaded. Without this, profileRegistry.getProfiles() returns []
+// because nothing else pulls in ./profiles/spring-cloud, so the detection
+// loop never iterates and the snapshot always falls back to 'generic' with
+// no matches — which is the exact failure mode the architecture WebUI
+// exhibits when the "检测依据" panel is empty.
+import './profiles/spring-cloud';
 import * as path from 'path';
 
 /**
