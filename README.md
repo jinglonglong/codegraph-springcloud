@@ -4,14 +4,15 @@
 
 ## Spring Cloud 语义知识图谱工具
 
-**为 Spring Boot / Spring Cloud 微服务架构增强的代码知识图谱**
+**基于 Springgraph 二次开发,专注 Spring Boot / Spring Cloud 微服务架构**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Fork of Springgraph](https://img.shields.io/badge/Fork%20of-Springgraph-blue.svg)](https://github.com/colbymchenry/springgraph)
 [![Node](https://img.shields.io/badge/Node.js-18%2B-brightgreen.svg)](https://nodejs.org/)
 
 </div>
 
-> Forked from [colbymchenry/springgraph](https://github.com/colbymchenry/springgraph).
+> **本项目基于 [Springgraph](https://github.com/colbymchenry/springgraph) 二次开发。**
 > 上游提供了 20+ 语言的 tree-sitter 抽取、SQLite + FTS5 知识图谱、原生文件监听与自动同步、MCP 服务器与多 Agent 接入能力。本仓库在此之上新增了面向 Spring Boot / Spring Cloud 微服务架构的语义层与架构剖面引擎。
 
 联系方式: xyjnglong@163.com
@@ -20,7 +21,7 @@
 
 ## 目录
 
-- [新增能力](#新增能力)
+- [二开新增能力](#二开新增能力)
 - [Spring Cloud 语义知识图谱](#spring-cloud-语义知识图谱)
 - [Spring MCP 工具 (4 个)](#spring-mcp-工具-4-个)
 - [架构剖面引擎](#架构剖面引擎-architecture-profile-engine)
@@ -37,7 +38,7 @@
 
 ---
 
-## 新增能力
+## 二开新增能力
 
 本仓库相对上游 [colbymchenry/springgraph](https://github.com/colbymchenry/springgraph) 的核心增量：
 
@@ -305,8 +306,8 @@ npm test                   # 运行 vitest 全量测试
 npm run clean              # 删除 dist/
 
 # Spring 语义层相关
-npm run build:springkg     # 构建 packages/springkg-* 各包
-npm run test:springkg      # 运行 packages/springkg-* 相关测试
+npm run build:springgraph  # 构建 packages/springkg-* 各包
+npm run test:springgraph   # 运行 packages/springkg-* 相关测试
 
 # 按文件/模式跑测试
 npx vitest run __tests__/extraction.test.ts

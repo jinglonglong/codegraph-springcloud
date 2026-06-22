@@ -26,8 +26,8 @@
     "test:eval": "vitest run __tests__/evaluation/",
     "eval": "npm run build && npx tsx __tests__/evaluation/runner.ts",
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\"",
-    "build:springkg": "tsc -b packages/springkg-shared packages/springkg-core packages/springkg-installer",
-    "test:springkg": "vitest run __tests__/team-a"
+    "build:springgraph": "tsc -b packages/springkg-shared packages/springkg-core packages/springkg-installer",
+    "test:springgraph": "vitest run __tests__/team-a"
   },
   "peerDependencies": {
     "@colbymchenry/springgraph": ">=0.9.0 <1.0.0"
