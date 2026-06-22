@@ -4,7 +4,7 @@
 
 ## Spring Cloud 语义知识图谱工具
 
-**基于 Springgraph 二次开发,专注 Spring Boot / Spring Cloud 微服务架构**
+**基于 Codegraph 二次开发,专注 Spring Boot / Spring Cloud 微服务架构**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Fork of Springgraph](https://img.shields.io/badge/Fork%20of-Springgraph-blue.svg)](https://github.com/colbymchenry/springgraph)
@@ -12,7 +12,7 @@
 
 </div>
 
-> **本项目基于 [Springgraph](https://github.com/colbymchenry/springgraph) 二次开发。**
+> **本项目基于 [codegraph](https://github.com/colbymchenry/codegraph) 二次开发。**
 > 上游提供了 20+ 语言的 tree-sitter 抽取、SQLite + FTS5 知识图谱、原生文件监听与自动同步、MCP 服务器与多 Agent 接入能力。本仓库在此之上新增了面向 Spring Boot / Spring Cloud 微服务架构的语义层与架构剖面引擎。
 
 联系方式: xyjnglong@163.com
@@ -358,7 +358,7 @@ springgraph/
 
 ## 致谢与许可
 
-- **上游项目**: [colbymchenry/springgraph](https://github.com/colbymchenry/springgraph),提供了完整的代码知识图谱基础设施
+- **上游项目**: [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph),提供了完整的代码知识图谱基础设施
 - **本仓库**: 在 Springgraph 基础上新增了面向 Spring Boot / Spring Cloud 的语义层与架构剖面引擎
 - **许可**: MIT(与上游一致)
 - **联系方式**: xyjnglong@163.com
