@@ -15,18 +15,18 @@ const install = 'npm install -g @jinglonglong/springgraph';
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
-		<title>springgraph — Code intelligence & architecture profiles for Spring Cloud</title>
+		<link class="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
+		<title>springgraph — 为 Spring Cloud 打造的语义图谱与 AI 协同引擎</title>
 		<meta
 			name="description"
-			content="A local-first code-intelligence tool and MCP server that turns Spring Boot and Spring Cloud microservices into a queryable knowledge graph for AI coding agents."
+			content="基于 Tree-sitter 的本地化代码智能工具。将微服务、HTTP 端点、Spring Bean 依赖及 MyBatis SQL 链路解析为图谱，让 AI Agent 提问效率提升 10 倍。"
 		/>
 		<meta property="og:title" content="springgraph" />
-		<meta property="og:description" content="Code intelligence & architecture profiles for Spring Cloud." />
+		<meta property="og:description" content="为 Spring Cloud 打造的语义图谱与 AI 协同引擎。" />
 		<meta property="og:type" content="website" />
 		<meta name="theme-color" content="#f7f6f2" />
 	</head>
@@ -35,8 +35,8 @@ const install = 'npm install -g @jinglonglong/springgraph';
 			<header class="nav">
 				<a class="wordmark" href={`${base}/`}>springgraph</a>
 				<nav class="nav-links">
-					<a href={`${base}/getting-started/introduction`}>Docs</a>
-					<a class="opt" href={`${base}/reference/languages`}>Languages</a>
+					<a href={`${base}/getting-started/introduction`}>文档</a>
+					<a class="opt" href={`${base}/reference/languages`}>支持语言</a>
 					<a href={repo}>GitHub</a>
 					<a class="star" href={`${repo}/stargazers`}>
 						<span class="star-glyph" aria-hidden="true">★</span>{stars}
@@ -47,14 +47,13 @@ const install = 'npm install -g @jinglonglong/springgraph';
 			<main>
 				<section class="hero">
 					<div class="hero-left">
-						<h1>Code intelligence for Spring Boot & Spring Cloud</h1>
+						<h1>为 Spring Boot / Spring Cloud 打造的语义图谱与 AI 协同引擎</h1>
 						<p class="lede">
-							A local-first tool and MCP server that turns your microservices into a
-							queryable semantic knowledge graph for AI coding agents.
+							基于 Tree-sitter 的本地化代码智能工具。将微服务、HTTP 端点、Spring Bean 依赖及 MyBatis SQL 链路解析为知识图谱，让 AI Agent (Claude Code/Cursor) 的代码分析效率提升 10 倍。
 						</p>
 						<div class="cta">
-							<a class="btn btn-primary" href={`${base}/getting-started/quickstart`}>Get started</a>
-							<a class="btn btn-ghost" href={`${base}/getting-started/introduction`}>View documentation</a>
+							<a class="btn btn-primary" href={`${base}/getting-started/quickstart`}>快速开始</a>
+							<a class="btn btn-ghost" href={`${base}/getting-started/introduction`}>查看文档</a>
 						</div>
 						<div class="install" data-install={install}>
 							<code>{install}</code>
@@ -71,6 +70,77 @@ const install = 'npm install -g @jinglonglong/springgraph';
 					</div>
 				</section>
 
+				<!-- 截图与效果展示 -->
+				<section class="showcase">
+					<div class="showcase-container">
+						<div class="showcase-card">
+							<div class="window-header">
+								<span class="dot red"></span>
+								<span class="dot yellow"></span>
+								<span class="dot green"></span>
+								<span class="window-title">终端演示 — springgraph serve --mcp</span>
+							</div>
+							<div class="window-body terminal-body">
+								<div class="line prompt">springgraph serve --mcp --path ./springcloud-demo</div>
+								<div class="line info">[springgraph] 正在初始化数据库连接...</div>
+								<div class="line info">[springgraph] 已成功加载 springkg.db (Spring 专属语义层)</div>
+								<div class="line info">[springgraph] MCP 本地服务器已在 stdio 管道就绪</div>
+								<div class="line success">[mcp] 成功注册 4 个 Spring Cloud 专属微服务分析工具:</div>
+								<div class="line tool">- spring_find_entry (按 URL/控制器/Feign名定位流量入口)</div>
+								<div class="line tool">- spring_trace_flow (全链路追踪: Endpoint -> Service -> Mapper -> SQL)</div>
+								<div class="line tool">- spring_assets_overview (系统服务画像与敏感配置总览)</div>
+								<div class="line tool">- spring_method_impact (分析方法变更的事务、SQL 与异常影响面)</div>
+								<div class="line prompt highlight">AI Agent 提问: "帮我分析 GET /api/users/{id} 的调用链"</div>
+								<div class="line result">=== 调用链分析结果 (Trace Flow) ===</div>
+								<div class="line result">1. [入口] UserController.getUser (UserController.java:24)</div>
+								<div class="line result">2. [业务] UserService.getUserById (UserService.java:12)</div>
+								<div class="line result">3. [数据] UserMapper.selectById (UserMapper.java:8)</div>
+								<div class="line result">4. [SQL] select * from users where id = #{id} (UserMapper.xml:4)</div>
+							</div>
+						</div>
+
+						<div class="showcase-card">
+							<div class="window-header">
+								<span class="dot red"></span>
+								<span class="dot yellow"></span>
+								<span class="dot green"></span>
+								<span class="window-title">Web UI — 架构依赖可视化浏览器 (springgraph web)</span>
+							</div>
+							<div class="window-body webui-body">
+								<div class="webui-sidebar">
+									<div class="sidebar-item active">架构剖面图</div>
+									<div class="sidebar-item">HTTP 端点列表</div>
+									<div class="sidebar-item">Feign 客户端</div>
+									<div class="sidebar-item">SQL 依赖树</div>
+								</div>
+								<div class="webui-canvas">
+									<div class="canvas-node entry" style="top: 30px; left: 140px;">
+										<span class="node-badge">Entry (入口层)</span>
+										<span class="node-name">UserController</span>
+									</div>
+									<div class="canvas-node remote" style="top: 115px; left: 20px;">
+										<span class="node-badge">Remote (远程层)</span>
+										<span class="node-name">OrderClient</span>
+									</div>
+									<div class="canvas-node business" style="top: 115px; left: 250px;">
+										<span class="node-badge">Business (业务层)</span>
+										<span class="node-name">UserService</span>
+									</div>
+									<div class="canvas-node data" style="top: 205px; left: 250px;">
+										<span class="node-badge">Data (数据层)</span>
+										<span class="node-name">UserMapper</span>
+									</div>
+									<svg class="canvas-lines" style="position: absolute; width: 100%; height: 100%; top: 0; left: 0; pointer-events: none;">
+										<path d="M 195 65 L 105 115" stroke="var(--cg-rule)" stroke-width="1.5" fill="none" />
+										<path d="M 195 65 L 285 115" stroke="var(--cg-rule)" stroke-width="1.5" fill="none" />
+										<path d="M 285 150 L 285 205" stroke="var(--cg-rule)" stroke-width="1.5" fill="none" />
+									</svg>
+								</div>
+							</div>
+						</div>
+					</div>
+				</section>
+
 				<section class="features">
 					<article class="feature">
 						<svg class="ficon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -80,9 +150,9 @@ const install = 'npm install -g @jinglonglong/springgraph';
 							<rect x="34" y="34" width="10" height="10" />
 							<path d="M24 14v10M9 34v-10h30v10M24 24v10" />
 						</svg>
-						<h2>Spring-Aware Semantic Graph</h2>
+						<h2>Spring 语义知识图谱</h2>
 						<p>
-							Deep parsing of REST endpoints, Feign Clients, Service beans, MyBatis SQL queries, and configuration files into an integrated graph.
+							深入解析 Spring Boot / Spring Cloud 特有注解，连接微服务网关、REST 端点、Service 业务层、Feign 远程调用及 MyBatis SQL，形成完整闭环。
 						</p>
 					</article>
 					<article class="feature">
@@ -90,9 +160,9 @@ const install = 'npm install -g @jinglonglong/springgraph';
 							<rect x="5" y="10" width="38" height="28" />
 							<path d="M13 20l6 4-6 4M26 28h9" />
 						</svg>
-						<h2>4 Core Spring MCP Tools</h2>
+						<h2>精简高效的 MCP 工具</h2>
 						<p>
-							Supercharge your AI agent with `spring_find_entry`, `spring_trace_flow`, `spring_assets_overview`, and `spring_method_impact`.
+							提供 4 个 Spring 专属工具，让 AI 过滤无用代码干扰，直奔端点逻辑、全链路追踪、事务与异常分析，提问响应速度及准确率大幅上升。
 						</p>
 					</article>
 					<article class="feature">
@@ -103,9 +173,9 @@ const install = 'npm install -g @jinglonglong/springgraph';
 							<circle cx="41" cy="17" r="2.5" />
 							<circle cx="41" cy="31" r="2.5" />
 						</svg>
-						<h2>Architecture Profiling & Web UI</h2>
+						<h2>架构剖面与可视化 Web UI</h2>
 						<p>
-							Classify your project into 6 layers and 15 roles, trace endpoint routes, and explore the layout visually in your browser.
+							自动把类划分为 6 层与 15 个架构角色（Controller, Mapper 等），并提供图形化的 Web 浏览器，让项目关系与依赖流一目了然。
 						</p>
 					</article>
 				</section>
@@ -114,10 +184,10 @@ const install = 'npm install -g @jinglonglong/springgraph';
 			<footer class="foot">
 				<span class="foot-mark">springgraph</span>
 				<nav class="foot-links">
-					<a href={`${base}/getting-started/introduction`}>Docs</a>
+					<a href={`${base}/getting-started/introduction`}>文档</a>
 					<a href={repo}>GitHub</a>
 					<a href={npm}>npm</a>
-					<a href={`${repo}/blob/master/LICENSE`}>MIT</a>
+					<a href={`${repo}/blob/master/LICENSE`}>许可证</a>
 				</nav>
 			</footer>
 		</div>
@@ -448,6 +518,153 @@ const install = 'npm install -g @jinglonglong/springgraph';
 					gap: 1rem;
 					align-items: flex-start;
 				}
+			}
+
+			/* ---- showcase ---- */
+			.showcase {
+				padding: 3rem 2rem;
+				border-bottom: 1px solid var(--cg-rule);
+				background: var(--cg-paper-2);
+			}
+			.showcase-container {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 2rem;
+			}
+			@media (max-width: 860px) {
+				.showcase-container {
+					grid-template-columns: 1fr;
+				}
+			}
+			.showcase-card {
+				border: 1px solid var(--cg-rule);
+				background: var(--cg-paper);
+				display: flex;
+				flex-direction: column;
+				min-height: 320px;
+			}
+			.window-header {
+				display: flex;
+				align-items: center;
+				padding: 0.6rem 1rem;
+				border-bottom: 1px solid var(--cg-rule);
+				background: var(--cg-paper-press);
+				gap: 0.4rem;
+			}
+			.dot {
+				width: 10px;
+				height: 10px;
+				border: 1px solid var(--cg-rule);
+				display: inline-block;
+			}
+			.dot.red { background: #ff5f56; }
+			.dot.yellow { background: #ffbd2e; }
+			.dot.green { background: #27c93f; }
+			.window-title {
+				margin-left: 0.5rem;
+				font-size: 0.85rem;
+				font-family: var(--sl-font-mono);
+				font-weight: 600;
+				color: var(--cg-ink-2);
+			}
+			.window-body {
+				padding: 1.2rem;
+				flex-grow: 1;
+				font-size: 0.85rem;
+				line-height: 1.5;
+				overflow: auto;
+			}
+			.terminal-body {
+				background: #1e1c16;
+				color: #f3f1ea;
+				font-family: var(--sl-font-mono);
+			}
+			:global(html[data-theme='dark']) .terminal-body {
+				background: #12110c;
+			}
+			.terminal-body .line {
+				margin-bottom: 0.3rem;
+				white-space: pre-wrap;
+			}
+			.terminal-body .prompt::before {
+				content: "$ ";
+				color: #87847a;
+			}
+			.terminal-body .info {
+				color: #b4b1a5;
+			}
+			.terminal-body .success {
+				color: #a3e635;
+			}
+			.terminal-body .tool {
+				padding-left: 1rem;
+				color: #38bdf8;
+			}
+			.terminal-body .result {
+				color: #fb923c;
+			}
+			.terminal-body .highlight {
+				color: #facc15;
+				font-weight: bold;
+				margin-top: 0.8rem;
+			}
+
+			/* Web UI Mockup */
+			.webui-body {
+				display: grid;
+				grid-template-columns: 130px 1fr;
+				padding: 0;
+				min-height: 260px;
+			}
+			.webui-sidebar {
+				border-right: 1px solid var(--cg-rule);
+				background: var(--cg-paper-2);
+				display: flex;
+				flex-direction: column;
+			}
+			.sidebar-item {
+				padding: 0.6rem 0.8rem;
+				font-size: 0.75rem;
+				border-bottom: 1px solid var(--cg-rule-soft);
+				cursor: pointer;
+				font-weight: 500;
+				color: var(--cg-ink-2);
+			}
+			.sidebar-item.active {
+				background: var(--cg-paper-press);
+				font-weight: bold;
+				border-left: 3px solid var(--cg-ink);
+				color: var(--cg-ink);
+			}
+			.webui-canvas {
+				position: relative;
+				background: var(--cg-paper);
+				overflow: hidden;
+			}
+			.canvas-node {
+				position: absolute;
+				border: 1px solid var(--cg-rule);
+				background: var(--cg-paper-2);
+				padding: 0.3rem 0.6rem;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				box-shadow: 2px 2px 0px var(--cg-rule);
+			}
+			.node-badge {
+				font-size: 0.6rem;
+				text-transform: uppercase;
+				color: var(--cg-ink-3);
+				font-weight: 700;
+				margin-bottom: 0.1rem;
+			}
+			.node-name {
+				font-size: 0.72rem;
+				font-family: var(--sl-font-mono);
+				font-weight: 600;
+			}
+			.canvas-lines {
+				stroke: var(--cg-rule);
 			}
 		</style>
 	</body>
