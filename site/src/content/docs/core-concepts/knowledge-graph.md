@@ -1,27 +1,27 @@
 ---
-title: The Knowledge Graph
-description: The node and edge kinds the graph is built from.
+title: 知识图谱
+description: 图谱由哪些节点类型与边类型构成。
 ---
 
-Springgraph stores three things: **nodes** (symbols and files), **edges** (relationships between them), and **files**. Every node and edge carries an exact `kind`, drawn from a fixed vocabulary so queries are consistent across languages.
+Springgraph 持久化三样东西：**节点**（符号与文件）、**边**（符号之间的关系），以及**文件**本身。每个节点和边都带一个精确的 `kind`，取自固定词表，保证跨语言查询的结果是一致的。
 
-## Node kinds
+## 节点类型
 
-`file`, `module`, `class`, `struct`, `interface`, `trait`, `protocol`, `function`, `method`, `property`, `field`, `variable`, `constant`, `enum`, `enum_member`, `type_alias`, `namespace`, `parameter`, `import`, `export`, `route`, `component`.
+`file`、`module`、`class`、`struct`、`interface`、`trait`、`protocol`、`function`、`method`、`property`、`field`、`variable`、`constant`、`enum`、`enum_member`、`type_alias`、`namespace`、`parameter`、`import`、`export`、`route`、`component`。
 
-## Edge kinds
+## 边类型
 
-`contains`, `calls`, `imports`, `exports`, `extends`, `implements`, `references`, `type_of`, `returns`, `instantiates`, `overrides`, `decorates`.
+`contains`、`calls`、`imports`、`exports`、`extends`、`implements`、`references`、`type_of`、`returns`、`instantiates`、`overrides`、`decorates`。
 
-## Provenance
+## 边的来源
 
-Most edges come straight from the AST. A few — at dynamic-dispatch boundaries that static parsing can't follow — are **synthesized** and marked with `provenance: 'heuristic'` plus the wiring site that created them. These are surfaced inline in `explore` and the `node` trail, so an agent can see exactly where a connection came from.
+绝大部分边直接来自 AST。还有少数处于静态解析跟不到的动态分发边界，会被**合成**出来，并标记为 `provenance: 'heuristic'`，同时附上创建它们的连接点位置。这些合成边会在 `explore` 与 `node` 的输出里就地展示，Agent 可以看清每条连接的来历。
 
-## Querying it
+## 如何查询
 
-- **Search** symbols by name (FTS5).
-- **Callers / callees** walk the call graph one hop at a time.
-- **Impact** computes the transitive radius affected by a change.
-- **Explore** returns source for several related symbols grouped by file, plus the call path among them, in one call.
+- **搜索**：按名称搜索符号（基于 FTS5）。
+- **调用方 / 被调方**：沿调用图一次一跳地遍历。
+- **影响面**：计算一次变更会波及的传递半径。
+- **Explore**：一次调用返回多个相关符号的源码，按文件分组，并给出它们之间的调用路径。
 
-See the [CLI](/springgraph/reference/cli/) and [MCP Server](/springgraph/reference/mcp-server/) references for how to run these.
+具体调用方式参见 [CLI](/springgraph/reference/cli/) 与 [MCP 服务器](/springgraph/reference/mcp-server/) 参考。
