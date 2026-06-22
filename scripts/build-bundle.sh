@@ -65,7 +65,7 @@ mkdir -p "$STAGE/lib" "$STAGE/bin"
 cp -R "$ROOT/dist" "$STAGE/lib/dist"
 cp "$ROOT/package.json" "$ROOT/package-lock.json" "$STAGE/lib/"
 echo "[bundle] installing production dependencies"
-( cd "$STAGE/lib" && npm ci --omit=dev --ignore-scripts >/dev/null 2>&1 )
+( cd "$STAGE/lib" && npm ci --omit=dev --ignore-scripts --legacy-peer-deps >/dev/null 2>&1 )
 rm -f "$STAGE/lib/package-lock.json"
 
 # 4. Vendored Node + launcher (the launcher uses the bundled Node by relative
