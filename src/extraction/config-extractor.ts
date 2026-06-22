@@ -17,7 +17,7 @@ import { generateNodeId } from './tree-sitter-helpers';
 const CONFIG_FILE_RE = /^(application|bootstrap)(-[\w.-]+)?\.(yml|yaml|properties)$/i;
 
 export function isSpringConfigFile(filePath: string): boolean {
-  const base = filePath.split('/').pop() ?? '';
+  const base = filePath.replace(/\\/g, '/').split('/').pop() ?? '';
   return CONFIG_FILE_RE.test(base);
 }
 
@@ -67,7 +67,7 @@ export class ConfigExtractor {
     const node: Node = {
       id,
       kind: 'file',
-      name: this.filePath.split('/').pop() || this.filePath,
+      name: this.filePath.replace(/\\/g, '/').split('/').pop() || this.filePath,
       qualifiedName: this.filePath,
       filePath: this.filePath,
       language: this.filePath.endsWith('.properties') ? 'properties' : 'yaml',

@@ -25,12 +25,12 @@
     "test:watch": "vitest",
     "test:eval": "vitest run __tests__/evaluation/",
     "eval": "npm run build && npx tsx __tests__/evaluation/runner.ts",
-    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\"",
+    "clean": "node -e \"const fs=require('fs'),path=require('path');fs.rmSync('dist',{recursive:true,force:true});const rmBuildInfo=(d)=>{if(!fs.existsSync(d))return;for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory()){if(e.name!=='node_modules')rmBuildInfo(p);}else if(e.name.endsWith('.tsbuildinfo'))fs.rmSync(p,{force:true});}};rmBuildInfo('.');\"",
     "build:springgraph": "tsc -b packages/springkg-shared packages/springkg-core packages/springkg-installer",
     "test:springgraph": "vitest run __tests__/team-a"
   },
-  "peerDependencies": {
-    "@colbymchenry/springgraph": ">=0.9.0 <1.0.0"
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "code-intelligence",
