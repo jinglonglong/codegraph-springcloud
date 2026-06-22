@@ -17,6 +17,9 @@
     "commander": "^12.1.0"
   },
   "peerDependencies": {
-    "@colbymchenry/springgraph": ">=0.9.0 <1.0.0"
+    "@colbymchenry/springgraph": "*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

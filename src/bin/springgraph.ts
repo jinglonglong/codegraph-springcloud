@@ -1427,6 +1427,50 @@ program
   });
 
 /**
+ * springgraph web
+ */
+program
+  .command('web [path]')
+  .description('Start the Springgraph Web UI (visual architecture graph)')
+  .option('-p, --port <number>', 'Port to run the Web UI on', '4000')
+  .option('--host <string>', 'Host to bind the Web UI to', '127.0.0.1')
+  .option('--no-open', 'Do not automatically open the browser')
+  .action(async (pathArg: string | undefined, options: { port?: string; host?: string; open?: boolean }) => {
+    const projectPath = resolveProjectPath(pathArg);
+
+    try {
+      if (!isInitialized(projectPath)) {
+        error(`Springgraph not initialized in ${projectPath}`);
+        info('Run "springgraph init" first');
+        process.exit(1);
+      }
+
+      const { default: Springgraph } = await loadSpringgraph();
+      const cg = await Springgraph.open(projectPath);
+
+      const { startWebServer } = await import('../web/server');
+      const publicDir = path.join(__dirname, '..', '..', 'dist', 'web', 'public');
+      
+      const { close } = await startWebServer(cg, {
+        port: parseInt(options.port || '4000', 10),
+        host: options.host || '127.0.0.1',
+        publicDir,
+        open: options.open !== false,
+      });
+
+      // Keep process alive until SIGINT
+      process.on('SIGINT', async () => {
+        info('Shutting down Web UI...');
+        await close();
+        process.exit(0);
+      });
+    } catch (err) {
+      error(`Failed to start Web UI: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+/**
  * springgraph unlock [path]
  */
 program

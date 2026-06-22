@@ -21,7 +21,7 @@ function findConfigKeyNode(queries: QueryBuilder, key: string): Node | null {
   );
   if (candidates.length === 0) return null;
   const score = (n: Node) => {
-    const base = n.filePath.split('/').pop() ?? '';
+    const base = n.filePath.replace(/\\/g, '/').split('/').pop() ?? '';
     const isBase = /^(application|bootstrap)\.(yml|yaml|properties)$/i.test(base);
     return (isBase ? 0 : 1) * 1000 + base.length;
   };
@@ -109,7 +109,7 @@ export function synthesizeSpringConfigImpact(
     }
 
     for (const binding of extractConfigurationPropertiesPrefixes(source)) {
-      const cls = classContainingLine(classes, binding.line);
+      const cls = classContainingLine(classes, binding.line) || nodeAtOrAfterLine(classes, binding.line);
       if (!cls) continue;
       const clsFields = fileNodes.filter(
         (n) => (n.kind === 'field' || n.kind === 'property') &&

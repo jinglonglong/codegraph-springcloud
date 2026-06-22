@@ -221,7 +221,7 @@ springgraph serve --mcp --path /path/to/springcloud-project
 **启动 Web UI 可视化**:
 
 ```bash
-npx tsx start-webui.ts
+springgraph web
 ```
 
 启动后按终端输出的地址访问,即可在浏览器里浏览架构图。

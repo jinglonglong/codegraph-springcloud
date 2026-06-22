@@ -10,5 +10,8 @@
   },
   "dependencies": {
     "@colbymchenry/springkg-shared": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
