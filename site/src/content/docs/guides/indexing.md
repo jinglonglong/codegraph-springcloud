@@ -1,34 +1,34 @@
 ---
-title: Indexing a Project
-description: Full index, incremental sync, and the file watcher.
+title: 项目索引
+description: 全量索引、增量同步与文件监听。
 ---
 
-## Initialize and index
+## 初始化并建索引
 
 ```bash
 cd your-project
-springgraph init -i      # initialize + full index
+springgraph init -i      # 初始化 + 全量建索引
 ```
 
-`init` creates `.springgraph/`; `-i`/`--index` builds the index immediately. To initialize without indexing, drop the flag and run `springgraph index` later.
+`init` 会创建 `.springgraph/` 目录;`-i` / `--index` 会立刻构建索引。如果只想初始化而不立刻建索引,可以省略该标志,稍后再手动执行 `springgraph index`。
 
-## Full vs. incremental
+## 全量 vs. 增量
 
 ```bash
-springgraph index           # full index of the whole project
-springgraph index --force   # re-index from scratch
-springgraph sync            # incremental — only changed files
+springgraph index           # 对整个项目执行全量索引
+springgraph index --force   # 强制从头重建索引
+springgraph sync            # 增量同步 —— 仅处理已变更的文件
 ```
 
-`sync` is fast because it only reparses what changed. Use it after a branch switch or a batch of edits.
+`sync` 速度很快,因为它只会重新解析发生变化的文件。切换分支或批量编辑后,推荐使用 `sync`。
 
-## Stay fresh automatically
+## 自动保持最新
 
-**You don't need to run `springgraph sync` by hand during an agent session.** When your agent (Claude Code, Cursor, Codex, opencode, Hermes, Gemini, Antigravity, Kiro) launches `springgraph serve --mcp`, three layers cooperate to keep the index in step with your code — and to never give the agent a quiet wrong answer in the small window between an edit and the next sync.
+**在 agent 会话期间,你不需要手动运行 `springgraph sync`。** 当你的 agent(Claude Code、Cursor、Codex、opencode、Hermes、Gemini、Antigravity、Kiro)启动 `springgraph serve --mcp` 时,三层机制会协同工作,保证索引始终跟得上代码变化,并避免在"刚编辑完成到下一次同步之间"的小窗口里给 agent 返回一个看起来没问题、实则过时的答案。
 
-### 1. File watcher with debounced auto-sync (always on)
+### 1. 文件监听 + 去抖自动同步(始终开启)
 
-`serve --mcp` spins up a native file watcher (FSEvents on macOS, inotify on Linux, ReadDirectoryChangesW on Windows) over the project root. Every source-file create / modify / delete is captured. A debounce timer collapses bursts of edits into a single sync.
+`serve --mcp` 会在项目根目录下启动一个原生文件监听器(macOS 上是 FSEvents,Linux 上是 inotify,Windows 上是 ReadDirectoryChangesW)。所有源文件的创建 / 修改 / 删除都会被捕获。去抖定时器会把突发性的多次编辑合并为一次同步。
 
 ```
 agent writes src/Widget.ts
@@ -38,11 +38,11 @@ agent writes src/Widget.ts
   → next agent query sees it
 ```
 
-**Tunable**: `SPRINGGRAPH_WATCH_DEBOUNCE_MS` overrides the default 2000ms, clamped to `[100ms, 60s]`. Useful when a build step or formatter writes many files in a tight burst — bump it to `5000` or `10000` so the watcher coalesces them into one sync.
+**可调参数**:`SPRINGGRAPH_WATCH_DEBOUNCE_MS` 覆盖默认的 2000ms,允许范围 `[100ms, 60s]`。当构建步骤或格式化工具在短时间内写入大量文件时很有用 —— 把它调到 `5000` 或 `10000`,让监听器把这些写入合并为一次同步。
 
-### 2. Per-file staleness banner — covers the debounce window
+### 2. 单文件陈旧提示 —— 覆盖去抖窗口
 
-The watcher debounce introduces a small window (typically 2s) where a freshly-edited file is on disk but not yet in the index. Springgraph closes that window with a per-file staleness banner: if any MCP tool response would reference a file that's currently pending re-index, the response prepends a `⚠️` banner naming the stale file:
+监听器的去抖机制会带来一个短暂窗口(通常是 2 秒):文件已经写到了磁盘,但索引还没来得及更新。Springgraph 通过一个"按文件粒度"的陈旧提示来消除这个窗口:只要某个 MCP 工具的响应中会引用到一个"当前等待重新索引"的文件,响应开头就会插入一条 `⚠️` 提示,点名这个文件:
 
 ```
 ⚠️ Some files referenced below were edited since the last index sync —
@@ -55,17 +55,17 @@ The rest of this response is fresh.
 …
 ```
 
-Agents read this and follow up with a direct `Read` on the named file — validated end-to-end with Claude Code, where the agent literally says "Reading the file directly for the live content" before opening it. So even during the 2-second debounce window, the agent never gets a silent wrong answer.
+Agent 看到这条提示后会直接对被点名的文件发起 `Read`,在 Claude Code 上已经端到端验证过 —— agent 会明确说出 "Reading the file directly for the live content",然后再打开文件。因此即便处于 2 秒的去抖窗口里,agent 也绝不会拿到一个看似正常、实则错误的答案。
 
-Pending files **not** referenced by the response surface as a small footer instead (`(Note: N file(s) elsewhere in this project are pending index sync but were not referenced above: …)`). Either way, the signal is explicit.
+那些**没有**在响应中被引用、但仍在等待同步的文件,则会以一段简短的页脚呈现(`(Note: N file(s) elsewhere in this project are pending index sync but were not referenced above: …)`)。无论如何,信号始终是显式的。
 
-### 3. Connect-time catch-up — covers gaps when the MCP server wasn't running
+### 3. 连接时的补齐 —— 覆盖 MCP 服务器未运行期间的空隙
 
-When your editor / agent (re)connects to the MCP server, springgraph runs a fast filesystem-based reconciliation (a `(size, mtime)` stat pre-filter, then a content hash on the rest) before answering the first query. So files changed while no MCP server was running — a `git pull` from the terminal, an edit from another editor, an agent that finished and exited — are caught up automatically on the next session's first tool call.
+当编辑器或 agent 重新连接到 MCP 服务器时,Springgraph 会在回答第一个查询之前,先基于文件系统做一次快速对账(先用 `(size, mtime)` 做 stat 预筛,再对剩下的文件做内容哈希)。这样,在 MCP 服务器没有运行期间发生的改动(在终端里 `git pull`、在另一个编辑器里编辑、上一个 agent 跑完退出了),都会在下一次会话的第一个工具调用时被自动补齐。
 
-### Verify what the watcher sees
+### 校验监听器看到的内容
 
-`springgraph_status` exposes the pending set first-class — useful for an agent asking "is the index caught up?" in one call:
+`springgraph_status` 把"等待同步"的文件集合作为一等公民暴露出来 —— agent 只需一次调用就能问出"索引跟上了吗?":
 
 ```
 springgraph_status →
@@ -75,27 +75,27 @@ springgraph_status →
   - src/Widget.ts (edited 1200ms ago)
 ```
 
-If `### Pending sync:` isn't in the response, nothing is in flight.
+如果响应里没有出现 `### Pending sync:`,说明没有任何待处理项。
 
-### When manual `springgraph sync` makes sense
+### 什么时候手动 `springgraph sync` 才合理
 
-Almost never. The edge cases:
+几乎不需要。少数边界场景:
 
-- **The watcher is disabled.** Sandboxes that block local fs watchers, or you've set `SPRINGGRAPH_NO_DAEMON=1` to opt out of the shared daemon. In those cases `springgraph sync` is the manual fallback.
-- **Pre-flight before a CI run.** If you're scripting against the index outside an agent session, a single `springgraph sync` at the start of the script guarantees the index reflects the current working tree.
+- **监听器被禁用了。** 例如沙箱阻止了本地文件系统监听,或者你通过 `SPRINGGRAPH_NO_DAEMON=1` 主动退出了共享守护进程。这种情况下,`springgraph sync` 是手动兜底手段。
+- **CI 跑批前的预检。** 如果你在 agent 会话之外、基于索引跑脚本,那么在脚本开头加一次 `springgraph sync`,可以保证索引反映当前工作树。
 
-Otherwise: just use it. The watcher + banner + connect-sync covers the AI-assisted workflow end-to-end. If you're seeing files genuinely missed after the debounce window has passed, that's a bug — please file an issue with a reproduction.
+其他场景:直接用监听器就行。"监听器 + 陈旧提示 + 连接时同步"已经端到端覆盖了 AI 辅助开发的工作流。如果你发现文件确实在去抖窗口过去之后仍然漏掉了同步,那就是 bug —— 欢迎带上复现步骤来提 issue。
 
-> See the v0.9.5 release notes for the [staleness banner (#403)](https://github.com/jinglonglong/springgraph/releases/tag/v0.9.5) and the connect-time catch-up (#414); both shipped together.
+> v0.9.5 发布说明里收录了 [staleness banner (#403)](https://github.com/jinglonglong/springgraph/releases/tag/v0.9.5) 与 connect-time catch-up (#414),这两项功能是一起发布的。
 
-## Check status
+## 查看状态
 
 ```bash
 springgraph status
 ```
 
-Reports node/edge/file counts, the active SQLite backend, and the journal mode. In an agent session, the MCP-side `springgraph_status` additionally surfaces the `### Pending sync:` block described above.
+输出节点 / 边 / 文件数量、当前激活的 SQLite 后端以及 journal mode。在 agent 会话里,基于 MCP 的 `springgraph_status` 还会额外输出上文提到的 `### Pending sync:` 区块。
 
-## What gets indexed
+## 哪些内容会被索引
 
-Every file whose extension maps to a [supported language](/springgraph/reference/languages/), minus dependency/build directories excluded by default (`node_modules`, `vendor`, `dist`, …), anything your `.gitignore` excludes, and files over 1 MB. See [Configuration](/springgraph/getting-started/configuration/).
+凡是扩展名能够映射到某一种 [支持的语言](/springgraph/reference/languages/) 的文件都会被索引,减掉默认排除的依赖 / 构建目录(`node_modules`、`vendor`、`dist` 等)、`.gitignore` 中排除的文件,以及大于 1 MB 的文件。详见 [配置说明](/springgraph/getting-started/configuration/)。

@@ -1,15 +1,15 @@
 ---
 title: API
-description: Use Springgraph as a TypeScript library.
+description: 将 Springgraph 作为 TypeScript 库使用。
 ---
 
-Springgraph ships a TypeScript API. The public surface is the `Springgraph` class.
+Springgraph 提供一套 TypeScript API。对外的公开接口是 `Springgraph` 类。
 
 ```typescript
 import Springgraph from '@jinglonglong/springgraph';
 
 const cg = await Springgraph.init('/path/to/project');
-// Or open an existing index:
+// 或者打开一个已有的索引:
 // const cg = await Springgraph.open('/path/to/project');
 
 await cg.indexAll({
@@ -25,21 +25,21 @@ const context = await cg.buildContext('fix login bug', {
 });
 const impact = cg.getImpactRadius(results[0].node.id, 2);
 
-cg.watch();   // auto-sync on file changes
-cg.unwatch(); // stop watching
+cg.watch();   // 文件变更时自动同步
+cg.unwatch(); // 停止监听
 cg.close();
 ```
 
-## Key methods
+## 关键方法
 
-| Method | Purpose |
+| 方法 | 用途 |
 |---|---|
-| `Springgraph.init(path)` / `Springgraph.open(path)` | Create or open a project index |
-| `indexAll(opts)` | Full index, with progress callback |
-| `sync()` | Incremental update |
-| `searchNodes(query)` | Full-text symbol search |
-| `getCallers(id)` / `getCallees(id)` | Walk the call graph |
-| `getImpactRadius(id, depth)` | Transitive impact of a change |
-| `buildContext(task, opts)` | Markdown / JSON context for AI |
-| `watch()` / `unwatch()` | Start / stop the file watcher |
-| `close()` | Close the database connection |
+| `Springgraph.init(path)` / `Springgraph.open(path)` | 创建或打开项目索引 |
+| `indexAll(opts)` | 全量索引,带进度回调 |
+| `sync()` | 增量更新 |
+| `searchNodes(query)` | 符号的全文搜索 |
+| `getCallers(id)` / `getCallees(id)` | 遍历调用图 |
+| `getImpactRadius(id, depth)` | 变更的传递性影响范围 |
+| `buildContext(task, opts)` | 为 AI 生成 Markdown / JSON 上下文 |
+| `watch()` / `unwatch()` | 启动 / 停止文件监听 |
+| `close()` | 关闭数据库连接 |

@@ -1,11 +1,11 @@
 ---
-title: Integrations
-description: Supported agents, and manual MCP setup.
+title: 集成
+description: 已支持的 Agent,以及手动配置 MCP 的方法。
 ---
 
-The interactive installer auto-detects and configures each supported agent — wiring up the MCP server and writing its instructions file.
+交互式安装器会自动识别并配置每个受支持的 Agent——接入 MCP 服务器,并写入对应的指令文件。
 
-## Supported agents
+## 受支持的 Agent
 
 - **Claude Code**
 - **Cursor**
@@ -16,17 +16,17 @@ The interactive installer auto-detects and configures each supported agent — w
 - **Antigravity IDE**
 - **Kiro**
 
-Run `npx @jinglonglong/springgraph` and pick your agent(s); see [Installation](/springgraph/getting-started/installation/) for the non-interactive flags.
+运行 `npx @jinglonglong/springgraph`,选择你要接入的 Agent 即可;非交互式参数见 [安装指南](/springgraph/getting-started/installation/)。
 
-## Manual setup
+## 手动配置
 
-If you'd rather wire it up yourself, install globally:
+如果你想自己手动接入,先全局安装:
 
 ```bash
 npm install -g @jinglonglong/springgraph
 ```
 
-Add the MCP server to `~/.claude.json`:
+在 `~/.claude.json` 中加入 MCP 服务器:
 
 ```json
 {
@@ -40,7 +40,7 @@ Add the MCP server to `~/.claude.json`:
 }
 ```
 
-Optionally auto-allow the read-only tools in `~/.claude/settings.json`:
+可选:在 `~/.claude/settings.json` 中预先放行只读工具:
 
 ```json
 {
@@ -59,5 +59,5 @@ Optionally auto-allow the read-only tools in `~/.claude/settings.json`:
 ```
 
 :::tip
-Cursor launches MCP subprocesses with the wrong working directory. The installer handles this for you by injecting a `--path` argument; if you wire Cursor up by hand, pass the project path explicitly.
+Cursor 启动 MCP 子进程时的工作目录是错误的。安装器会自动注入 `--path` 参数帮你处理;如果你手动配置 Cursor,请显式传入项目路径。
 :::

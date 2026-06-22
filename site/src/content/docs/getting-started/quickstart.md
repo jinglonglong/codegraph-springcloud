@@ -1,11 +1,23 @@
 ---
-title: Get Started
-description: Get up and running with Springgraph in seconds.
+title: 快速开始
+description: 几秒钟内启动并运行 Springgraph。
 ---
 
-Get up and running with Springgraph in seconds.
+几秒钟内启动并运行 Springgraph。
 
-## No Node.js required — one command grabs the right build for your OS
+## 推荐方式:通过 npm 全局安装
+
+```bash
+# 全局安装(推荐,需要 Node.js >= 18)
+npm install -g @jinglonglong/springgraph
+
+# 或者使用 npx 免安装运行
+npx @jinglonglong/springgraph
+```
+
+Springgraph 自带运行时,无需编译,没有本地构建,跨平台一致。交互式安装器会自动配置你的 agent:Claude Code、Cursor、Codex CLI、opencode、Hermes Agent、Gemini CLI、Antigravity IDE、Kiro。
+
+## 不想装 Node.js?一键脚本(自动下载适合你系统的二进制)
 
 ```bash
 # macOS / Linux
@@ -15,22 +27,13 @@ curl -fsSL https://raw.githubusercontent.com/jinglonglong/springgraph/master/ins
 irm https://raw.githubusercontent.com/jinglonglong/springgraph/master/install.ps1 | iex
 ```
 
-## Already have Node? Use npm instead (works on any version)
-
-```bash
-npx @jinglonglong/springgraph        # zero-install, or:
-npm i -g @jinglonglong/springgraph
-```
-
-Springgraph bundles its own runtime — nothing to compile, no native build, works the same everywhere. The interactive installer auto-configures your agent(s) — Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro.
-
-## Initialize Projects
+## 初始化项目
 
 ```bash
 cd your-project
 springgraph init -i
 ```
 
-That's it — your agent will use Springgraph tools automatically when a `.springgraph/` directory exists.
+就这些,只要 `.springgraph/` 目录存在,你的 agent 会自动使用 Springgraph 工具。
 
-Next: build [Your First Graph](/springgraph/getting-started/your-first-graph/), or see the full [Installation](/springgraph/getting-started/installation/) options.
+下一步:构建[你的第一个图谱](/springgraph/getting-started/your-first-graph/),或者查看完整的[安装](/springgraph/getting-started/installation/)选项。
