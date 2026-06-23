@@ -23,6 +23,7 @@ import { detectLanguage, isSourceFile, isLanguageSupported, isFileLevelOnlyLangu
 import { isSpringgraphDataDir } from '../directory';
 import { logDebug, logWarn } from '../errors';
 import { ParseWorkerPool } from './parse-pool';
+import { BatchStore } from '../db/batch-store';
 import { validatePathWithinRoot, normalizePath } from '../utils';
 import ignore, { Ignore } from 'ignore';
 import { detectFrameworks } from '../resolution/frameworks';
@@ -1223,16 +1224,38 @@ export class ExtractionOrchestrator {
     // SPRINGGRAPH_NO_PARALLEL_INIT=1. Bookkeeping (counts, errors,
     // storeExtractionResult) is shared via processParseResult so the
     // two paths report identical stats.
-    const processParseResult = (
+    //
+    // init-performance change, phase 2: processParseResult also
+    // routes the DB write through a BatchStore when batching is
+    // enabled (default). The batched path buffers nodes/edges/
+    // refs/file rows across N files and commits them in a single
+    // transaction, instead of the per-file BEGIN/COMMIT path used
+    // by `this.storeExtractionResult`. On the 102-file benchmark
+    // fixture this is the dominant cost — the per-file path
+    // issues ~4 transactions per file; the batched path issues
+    // one per batch.
+    const batchStore = !process.env.SPRINGGRAPH_NO_BATCH_WRITES
+      ? new BatchStore(this.queries, {
+          batchSize: this.tunables?.batchSize ?? 100,
+          batchFlushMs: this.tunables?.batchFlushMs ?? 250,
+          log: log,
+        })
+      : null;
+
+    const processParseResult = async (
       filePath: string,
       content: string,
       stats: fs.Stats,
       result: ExtractionResult
-    ): void => {
+    ): Promise<void> => {
       processed++;
       if (result.nodes.length > 0 || result.errors.length === 0) {
         const language = detectLanguage(filePath, content);
-        this.storeExtractionResult(filePath, content, language, stats, result);
+        if (batchStore) {
+          await batchStore.append(filePath, content, language, stats, result);
+        } else {
+          this.storeExtractionResult(filePath, content, language, stats, result);
+        }
       }
       if (result.errors.length > 0) {
         for (const err of result.errors) {
@@ -1377,7 +1400,7 @@ export class ExtractionOrchestrator {
           } else {
             const meta = fileMeta.get(item.filePath);
             if (meta) {
-              processParseResult(item.filePath, meta.content, meta.stats, item.result);
+              await processParseResult(item.filePath, meta.content, meta.stats, item.result);
             }
           }
           received++;
@@ -1441,7 +1464,7 @@ export class ExtractionOrchestrator {
             continue;
           }
 
-          processParseResult(filePath, content, stats, result);
+          await processParseResult(filePath, content, stats, result);
         }
       }
     }
@@ -1580,6 +1603,18 @@ export class ExtractionOrchestrator {
         await parsePool.close();
       } catch (err) {
         logWarn('Parse worker pool close failed', { error: (err as Error).message });
+      }
+    }
+
+    // init-performance change, phase 2: flush any remaining
+    // buffered rows in the BatchStore. close() is a no-op when
+    // the buffer is already empty (which is the case if the last
+    // batch's flush trigger fired before the loop ended).
+    if (batchStore) {
+      try {
+        await batchStore.close();
+      } catch (err) {
+        logWarn('BatchStore close failed', { error: (err as Error).message });
       }
     }
 

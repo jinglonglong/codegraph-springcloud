@@ -1841,4 +1841,18 @@ export class QueryBuilder {
       this.db.exec('DELETE FROM files');
     })();
   }
+
+  /**
+   * Run `fn` inside a single SQLite transaction. The function's
+   * return value is propagated. Throws are converted to a ROLLBACK
+   * by the underlying binding and re-thrown.
+   *
+   * Exposed for callers that need cross-statement atomicity
+   * without reaching into the private `db` handle. Used by the
+   * BatchStore (init-performance change, phase 2) to commit a
+   * whole file's nodes/edges/refs/file row in one transaction.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
 }
