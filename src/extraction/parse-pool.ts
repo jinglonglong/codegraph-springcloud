@@ -318,6 +318,14 @@ export class ParseWorkerPool {
 
   private spawnWorker(idx: number): WorkerSlot {
     const worker = new Worker(this.workerPath);
+    // init-performance change, phase 4: `unref()` so idle workers
+    // don't keep the Node.js event loop alive past the orchestrator's
+    // main-thread work. The pool closes workers explicitly via
+    // `close()` (which terminates them); `unref()` is the safety net
+    // for the rare "orchestrator returned without calling close()"
+    // path (a thrown error in main-thread code, a process.exit
+    // from a non-pool caller, etc.).
+    worker.unref();
     let readyResolve!: () => void;
     const ready = new Promise<void>((resolve) => {
       readyResolve = resolve;
