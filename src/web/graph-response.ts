@@ -113,6 +113,7 @@ export function serializeNodeWithFacet(
     isEntrypoint: facet.isEntrypoint,
     evidence: facet.evidence,
     module: facet.module,
+    moduleType: facet.moduleType,
     packageName: facet.packageName,
   };
 }

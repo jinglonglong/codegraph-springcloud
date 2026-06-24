@@ -56,6 +56,21 @@ CREATE TABLE IF NOT EXISTS edges (
     FOREIGN KEY (target) REFERENCES nodes(id) ON DELETE CASCADE
 );
 
+-- Modules: Multi-module project hierarchy and service metadata
+CREATE TABLE IF NOT EXISTS modules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_root TEXT NOT NULL,
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    parent_path TEXT,
+    packaging TEXT NOT NULL,
+    is_service INTEGER DEFAULT 0,
+    main_class_node_id TEXT,
+    port INTEGER,
+    pom_path TEXT NOT NULL,
+    UNIQUE(project_root, path)
+);
+
 -- Files: Tracked source files
 CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
@@ -79,7 +94,8 @@ CREATE TABLE IF NOT EXISTS files (
     modified_at INTEGER NOT NULL,
     indexed_at INTEGER NOT NULL,
     node_count INTEGER DEFAULT 0,
-    errors TEXT -- JSON array
+    errors TEXT, -- JSON array
+    module_id INTEGER REFERENCES modules(id)
 );
 
 -- Unresolved References: References that need resolution after full indexing
@@ -157,6 +173,11 @@ CREATE INDEX IF NOT EXISTS idx_files_modified_at ON files(modified_at);
 -- guard) so a v6 → v7 upgrade on an existing DB lands the index
 -- even when schema.sql hasn't been re-run.
 CREATE INDEX IF NOT EXISTS idx_files_cheap_hash ON files(cheap_hash);
+CREATE INDEX IF NOT EXISTS idx_files_module ON files(module_id);
+
+-- Module indexes
+CREATE INDEX IF NOT EXISTS idx_modules_parent ON modules(project_root, parent_path);
+CREATE INDEX IF NOT EXISTS idx_modules_service ON modules(project_root, is_service);
 
 -- Unresolved refs indexes
 CREATE INDEX IF NOT EXISTS idx_unresolved_from_node ON unresolved_refs(from_node_id);

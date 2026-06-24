@@ -94,6 +94,9 @@ export interface NodeArchitectureFacet {
   /** Associated module name (e.g. Maven module) */
   module?: string;
 
+  /** Associated module type ('service' | 'library' | 'parent-pom') */
+  moduleType?: 'service' | 'library' | 'parent-pom';
+
   /** Package name of the node */
   packageName?: string;
 
@@ -157,6 +160,18 @@ export interface RoleConflict {
   resolvedRole?: ArchitectureRole;
 }
 
+export interface ModuleNode {
+  id: number;
+  path: string;
+  name: string;
+  parentPath: string | null;
+  packaging: string;
+  isService: boolean;
+  mainClassNodeId?: string;
+  port?: number;
+  children?: ModuleNode[];
+}
+
 /**
  * ArchitectureSnapshot bundles the project-level profile detection result,
  * the resolved active profile, and the per-node facet map. This is the shape
@@ -167,6 +182,8 @@ export interface ArchitectureSnapshot {
   profile: ArchitectureProfile;
   facets: Map<string, NodeArchitectureFacet>;
   nodes: Node[];
+  moduleTree?: ModuleNode[];
+  serviceModules?: ModuleNode[];
 }
 
 /**

@@ -212,9 +212,9 @@ describe.skipIf(!HAS_SQLITE)('init-performance v7 — fresh-DB path', () => {
     expect(names).toContain('idx_files_cheap_hash');
   });
 
-  it('CURRENT_SCHEMA_VERSION is 7', async () => {
+  it('CURRENT_SCHEMA_VERSION is 8', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../src/db/migrations');
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
   });
 });
 
@@ -254,11 +254,11 @@ describe.skipIf(!HAS_SQLITE)('init-performance v7 — v6 → v7 transition', () 
     expect(names).toContain('idx_files_cheap_hash');
   });
 
-  it('open() records the v7 migration with the migration description (not initialize\'s generic text)', async () => {
+  it('open() records the v7 and v8 migrations with correct descriptions', async () => {
     const { DatabaseConnection } = await import('../src/db');
     DatabaseConnection.open(dbPath).close();
 
-    expect(readVersion(dbPath)).toBe(7);
+    expect(readVersion(dbPath)).toBe(8);
     const desc = readVersionDescription(dbPath, 7);
     expect(desc).not.toBeNull();
     // The migration's own description, not the generic
@@ -266,6 +266,10 @@ describe.skipIf(!HAS_SQLITE)('init-performance v7 — v6 → v7 transition', () 
     // DatabaseConnection.initialize for fresh DBs.
     expect(desc).toMatch(/cheap_hash.*blob_oid/);
     expect(desc).not.toMatch(/Initial schema includes all migrations/);
+
+    const desc8 = readVersionDescription(dbPath, 8);
+    expect(desc8).not.toBeNull();
+    expect(desc8).toMatch(/modules.*module_id/);
   });
 
   it('open() backfills cheap_hash from content_hash on existing rows', async () => {
@@ -301,15 +305,15 @@ describe.skipIf(!HAS_SQLITE)('init-performance v7 — v6 → v7 transition', () 
     db.close();
   });
 
-  it('open() is idempotent (re-running open does not duplicate the v=7 row)', async () => {
+  it('open() is idempotent (re-running open does not duplicate migration rows)', async () => {
     const { DatabaseConnection } = await import('../src/db');
     DatabaseConnection.open(dbPath).close();
     DatabaseConnection.open(dbPath).close();
     DatabaseConnection.open(dbPath).close();
 
     const versions = readVersionList(dbPath);
-    // Exactly one v=6 row (the seed) and one v=7 row (the migration).
-    expect(versions).toEqual([6, 7]);
+    // Exactly one v=6 row (the seed), one v=7 row, and one v=8 row.
+    expect(versions).toEqual([6, 7, 8]);
   });
 
   it('open() leaves blob_oid NULL for newly-inserted rows after migration', async () => {
