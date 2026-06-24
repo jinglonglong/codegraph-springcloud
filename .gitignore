@@ -56,6 +56,7 @@ npm-debug.log*
 资料/
 openspec/
 .playwright-mcp/
+.opencode/
 
 test_frameworks
 

@@ -15,6 +15,10 @@ Springgraph 基于 [colbymchenry/codegraph](https://github.com/colbymchenry/code
 - `springgraph init` 和 `springgraph index` 新增了 8 个可调参数，方便你根据机器配置调优：`--threads`（解析工作线程数，默认根据 CPU 数量推导）、`--ram`（总内存预算 MB，用于设置 SQLite 缓存和每个工作线程默认内存）、`--batch-size`（每个数据库事务包含的文件数）、`--batch-flush-ms`（按时间触发刷盘的阈值）、`--size-limit`（单个文件大小上限 MB，替代之前的 1 MB 硬限制）、`--worker-ram`（每个工作线程的 RSS 预算）、`--use-git` / `--no-git`（强制启用或禁用 git-native 文件枚举），以及 `--progress-interval-ms`（进度回调节流间隔）。每个参数都有对应的环境变量（例如 `SPRINGGRAPH_THREADS`、`SPRINGGRAPH_NO_PARALLEL_INIT=1`），便于在 CI 和容器环境使用。
 - 为支持新的跳过路径，底层数据库 schema 已升级到 v7。现有索引在首次运行时会自动迁移。同时提供了两个环境变量用于回退到旧行为：`SPRINGGRAPH_NO_PARALLEL_INIT=1` 回退到单线程解析，`SPRINGGRAPH_NO_BATCH_WRITES=1` 回退到逐文件数据库事务。两者默认均为关闭（新路径是默认）。
 
+### 维护
+
+- `.opencode/` 目录（OpenSpec 本地开发工具）已从仓库中彻底移除：加入 `.gitignore` 并通过 `git filter-branch` 从全部历史提交中清除。新克隆的仓库不再包含此目录。
+
 ## [1.0.1] - 2026-06-13
 
 ### 新功能
