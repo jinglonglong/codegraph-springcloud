@@ -67,12 +67,8 @@ const startTime: number = (workerData?.startTime as number | undefined) ?? Date.
 const phases = new Map<string, PhaseState>();
 const order: string[] = [];
 
-/**
- * Last-rendered content for each line in the block. `null` = never rendered
- * (or rendered and then the block shrank past this index). Used by the
- * diff render to skip lines whose content hasn't changed.
- */
-let lineContent: (string | null)[] = [];
+// Height of the rendered block, in logical lines (not terminal rows). Used
+// to move the cursor from "below the block" back to the top on each redraw.
 let blockHeight = 0;
 
 let renderInterval: NodeJS.Timeout | null = null;
@@ -205,68 +201,53 @@ function buildLines(frame: number): string[] {
     const phase = phases.get(id);
     if (!phase) continue;
     out.push(renderHeaderLine(frame, phase));
-    for (let w = 0; w < phase.workers.length; w++) {
-      const worker = phase.workers[w]!;
-      out.push(renderWorkerLine(frame, phase, worker));
+    // Worker sub-bars are only meaningful while the phase is running.
+    // Hide idle workers (total=0) and collapse sub-bars once the phase
+    // is done so the final frame is clean.
+    if (phase.status !== 'done') {
+      for (let w = 0; w < phase.workers.length; w++) {
+        const worker = phase.workers[w]!;
+        if (worker.total > 0) {
+          out.push(renderWorkerLine(frame, phase, worker));
+        }
+      }
     }
   }
   return out;
 }
 
 /**
- * Incremental render. Walks the line list and emits only the lines that
- * changed since the last render. Cursor navigation: move to top of block,
- * skip down to the topmost dirty line, redraw from there to the end. When
- * the block grows (a new phase is added or a phase gains its first
- * worker) the previously-existing lines are still considered "unchanged"
- * and not re-emitted; only the new tail is drawn.
+ * Full-block redraw.
+ *
+ * We deliberately do NOT use line-level diff: the block is tiny (≤10 lines),
+ * and partial-redraw cursor math is fragile once lines wrap or the block
+ * grows (worker sub-bars appearing under a phase). Instead, after every
+ * render we emit a trailing newline so the cursor is at column 0 of the row
+ * directly below the block. The next render moves up by `blockHeight` rows,
+ * redraws the whole block, and ends with another newline. Done phases still
+ * redraw, but since their content is static the visual result is stable.
  */
 function render(): void {
   if (order.length === 0) return;
   const frame = animFrame();
   const newLines = buildLines(frame);
 
-  // Trim stored content if the block shrunk (phase removed — not currently
-  // supported, but cheap insurance).
-  if (lineContent.length > newLines.length) {
-    lineContent.length = newLines.length;
-  }
-
-  // Find the topmost dirty line — i.e. the first index where the content
-  // differs from the previously rendered content. If everything is clean
-  // (e.g. a running phase with frozen worker lines), skip the whole render.
-  let topDirty = -1;
-  for (let i = 0; i < newLines.length; i++) {
-    if (lineContent[i] !== newLines[i]) {
-      topDirty = i;
-      break;
-    }
-  }
-  if (topDirty === -1) return;
-
-  // Move cursor to top of block. `blockHeight` is the line count from the
-  // last successful render; the cursor is "below the block" between renders.
+  // Move cursor from "below the block" back to the top of the block.
   if (blockHeight > 0) {
     process.stdout.write(`\x1b[${blockHeight}A`);
   }
-  // Walk down to the topmost dirty line (no-op when topDirty === 0).
-  if (topDirty > 0) {
-    process.stdout.write(`\x1b[${topDirty}B`);
-  }
 
-  // Redraw from topDirty to the end. After this loop, the cursor is at
-  // col 0 of the line immediately after the last rendered line — exactly
-  // the "below the block" position we need.
-  for (let i = topDirty; i < newLines.length; i++) {
-    const line = newLines[i] as string;
+  for (let i = 0; i < newLines.length; i++) {
     process.stdout.write('\r\x1b[K');
-    process.stdout.write(line);
-    lineContent[i] = line;
+    process.stdout.write(newLines[i] as string);
     if (i < newLines.length - 1) {
       process.stdout.write('\n');
     }
   }
 
+  // Leave cursor on a fresh row below the block. This is the anchor point
+  // the next render will move up from.
+  process.stdout.write('\n');
   blockHeight = newLines.length;
 }
 
@@ -388,12 +369,9 @@ parentPort?.on('message', (msg: ShimmerWorkerMessage) => {
         }
       }
       render();
-      // Drop below our last line so the caller can keep printing.
-      if (blockHeight > 0) {
-        process.stdout.write('\n');
-        blockHeight = 0;
-      }
-      lineContent = [];
+      // Render() already left the cursor on a fresh row below the block,
+      // so we just reset the tracked height.
+      blockHeight = 0;
       parentPort?.postMessage({ type: 'stopped' });
       break;
     }

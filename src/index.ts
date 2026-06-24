@@ -953,6 +953,15 @@ export class Springgraph {
       await pool.close();
     }
 
+    // Mark the resolve phase complete in the UI and collapse worker bars.
+    try {
+      const { getCurrentShimmerProgress } = require('./ui/shimmer-progress') as typeof import('./ui/shimmer-progress');
+      getCurrentShimmerProgress()?.updateWorkers('resolving', []);
+      getCurrentShimmerProgress()?.completePhase('resolving');
+    } catch {
+      /* progress UI not active — ignore */
+    }
+
     onProgress?.(total, total);
     return {
       resolved: [],

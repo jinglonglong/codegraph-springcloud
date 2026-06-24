@@ -500,15 +500,15 @@ export class ResolveWorkerPool {
   }
 
   /**
-   * Build a per-worker progress snapshot suitable for the UI. Includes every
-   * worker slot, even idle ones (current=0, total=0) so the UI can show a
-   * consistent N lines for the lifetime of the resolve phase.
+   * Build a per-worker progress snapshot suitable for the UI. Only includes
+   * workers that have actually been assigned work, so the UI doesn't show
+   * idle slots as empty `0/0` bars.
    */
   private snapshotWorkerProgress(): WorkerProgressSnapshot[] {
     const out: WorkerProgressSnapshot[] = [];
     for (let i = 0; i < this.slots.length; i++) {
       const stats = this.workerStats.get(i);
-      if (!stats) continue;
+      if (!stats || stats.totalAssigned === 0) continue;
       const current = stats.resolvedFromCompleted + stats.inflightProgress;
       out.push({ id: i, current, total: stats.totalAssigned });
     }
