@@ -6,6 +6,7 @@
  */
 
 import * as path from 'path';
+import * as os from 'os';
 import {
   Node,
   Edge,
@@ -45,6 +46,8 @@ import {
   createResolver,
   ResolutionResult,
 } from './resolution';
+import { ResolveWorkerPool } from './parallel-resolution/resolve-pool';
+import { defaultThreads } from './init/tunables';
 import { GraphTraverser, GraphQueryManager } from './graph';
 import { ContextBuilder, createContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
@@ -754,9 +757,196 @@ export class Springgraph {
   /**
    * Resolve references in batches to keep memory bounded on large codebases.
    * Processes chunks of unresolved refs, persisting results after each batch.
+   *
+   * When `SPRINGGRAPH_RESOLVE_THREADS` is greater than 1 (or defaults to
+   * `cpus().length - 1`), the work is distributed across a worker thread pool.
+   * Single-thread behavior is preserved when the variable is set to 1.
    */
   async resolveReferencesBatched(onProgress?: (current: number, total: number) => void): Promise<ResolutionResult> {
-    return this.resolver.resolveAndPersistBatched(onProgress);
+    const threads = this.resolveResolveThreads();
+    // Surface the worker count to the progress UI (e.g. "7 worker 并行解析中")
+    // so the user can see whether resolution is actually parallel.
+    if (threads > 1) {
+      try {
+        const { getCurrentShimmerProgress } = await import('./ui/shimmer-progress');
+        getCurrentShimmerProgress()?.updatePhase(
+          'resolving',
+          0,
+          this.queries.getUnresolvedReferencesCount(),
+          `${threads} worker 并行解析中`
+        );
+      } catch { /* progress UI not active — ignore */ }
+    }
+    if (threads <= 1) {
+      return this.resolver.resolveAndPersistBatched(onProgress);
+    }
+    return this.resolveReferencesBatchedParallel(onProgress, threads);
+  }
+
+  /**
+   * Determine the number of resolution worker threads from the environment.
+   * Honors `SPRINGGRAPH_RESOLVE_THREADS`. Defaults to the same host-derived
+   * cap used for parse workers (`max(1, min(8, cpus - 1))`).
+   */
+  private resolveResolveThreads(): number {
+    const raw = process.env.SPRINGGRAPH_RESOLVE_THREADS;
+    if (raw !== undefined && raw !== '') {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed) && Number.isInteger(parsed)) {
+        return Math.max(0, parsed);
+      }
+    }
+    return defaultThreads(os.cpus().length);
+  }
+
+  /**
+   * Parallel batched resolution using worker threads.
+   *
+   * Workers own independent SQLite reader connections and resolve batches of
+   * `unresolved_refs`. The main thread persists edges, deletes resolved refs,
+   * and runs the additive synthesizers and deferred second passes so writes
+   * stay serial and safe.
+   */
+  private async resolveReferencesBatchedParallel(
+    onProgress: ((current: number, total: number) => void) | undefined,
+    threads: number
+  ): Promise<ResolutionResult> {
+    const total = this.queries.getUnresolvedReferencesCount();
+    const batchSize = 5000;
+    const aggregateStats = {
+      total: 0,
+      resolved: 0,
+      unresolved: 0,
+      byMethod: {} as Record<string, number>,
+    };
+
+    if (total === 0) {
+      onProgress?.(0, 0);
+    }
+
+    const deferredChainRefs: import('./resolution/types').UnresolvedRef[] = [];
+    const deferredThisMemberRefs: import('./resolution/types').UnresolvedRef[] = [];
+    const deferredSuperMemberRefs: import('./resolution/types').UnresolvedRef[] = [];
+
+    const pool = new ResolveWorkerPool(
+      this.projectRoot,
+      this.db.getPath(),
+      threads,
+      this.resolver.getDetectedFrameworks(),
+      onProgress,
+      100
+    );
+
+    try {
+      await pool.start();
+
+      // Process references in waves: fetch up to `maxInFlight` batches, let the
+      // worker pool resolve them in parallel, then persist all edges and delete
+      // all processed refs on the main thread. Keeping all writes on the main
+      // thread and all reads in workers avoids SQLite writer/reader contention
+      // (WAL allows many readers, but interleaving writes from the main thread
+      // with worker reads can still produce SQLITE_BUSY on some backends).
+      const maxInFlight = Math.max(threads * 2, 4);
+      let afterId = 0;
+      let doneFetching = false;
+
+      while (!doneFetching) {
+        const batches: import('./resolution/types').UnresolvedRef[][] = [];
+        while (!doneFetching && batches.length < maxInFlight) {
+          const batch = this.queries.getUnresolvedReferencesBatchAfterId(afterId, batchSize);
+          if (batch.length === 0) {
+            doneFetching = true;
+            break;
+          }
+          const lastId = (batch[batch.length - 1] as unknown as { id: number }).id;
+          if (typeof lastId !== 'number') {
+            throw new Error(`Invalid last row id: ${JSON.stringify(lastId)}`);
+          }
+          afterId = lastId;
+          batches.push(batch as unknown as import('./resolution/types').UnresolvedRef[]);
+        }
+
+        if (batches.length === 0) break;
+
+        const results = await Promise.all(batches.map((b) => pool.submitBatch(b)));
+
+        for (const result of results) {
+          // Persist edges from resolved refs.
+          if (result.resolved.length > 0) {
+            const edges = this.resolver.createEdges(result.resolved);
+            if (edges.length > 0) {
+              this.queries.insertEdges(edges);
+            }
+          }
+
+          // Delete both resolved and unresolved refs so they aren't re-read.
+          const toDelete = [
+            ...result.resolved.map((r) => ({
+              fromNodeId: r.original.fromNodeId,
+              referenceName: r.original.referenceName,
+              referenceKind: r.original.referenceKind,
+            })),
+            ...result.unresolved.map((r) => ({
+              fromNodeId: r.fromNodeId,
+              referenceName: r.referenceName,
+              referenceKind: r.referenceKind,
+            })),
+          ];
+          for (const d of toDelete) {
+            if (typeof d.fromNodeId !== 'string' || typeof d.referenceName !== 'string' || typeof d.referenceKind !== 'string') {
+              throw new Error(
+                `Invalid ref key for delete: ${JSON.stringify(d)} (resolved sample: ${JSON.stringify(result.resolved.slice(0, 2))}, unresolved sample: ${JSON.stringify(result.unresolved.slice(0, 2))})`
+              );
+            }
+          }
+          if (toDelete.length > 0) {
+            this.queries.deleteSpecificResolvedReferences(toDelete);
+          }
+
+          // Accumulate deferred refs for the second pass.
+          deferredChainRefs.push(...result.deferredChainRefs);
+          deferredThisMemberRefs.push(...result.deferredThisMemberRefs);
+          deferredSuperMemberRefs.push(...result.deferredSuperMemberRefs);
+
+          aggregateStats.total += result.stats.total;
+          aggregateStats.resolved += result.stats.resolved;
+          aggregateStats.unresolved += result.stats.unresolved;
+          for (const [method, count] of Object.entries(result.stats.byMethod)) {
+            aggregateStats.byMethod[method] = (aggregateStats.byMethod[method] || 0) + count;
+          }
+        }
+
+        onProgress?.(aggregateStats.total, total);
+      }
+
+      // Additive synthesizers (run on main thread so they can write edges).
+      const synthStats = this.resolver.runSynthesizers();
+      for (const [method, count] of Object.entries(synthStats)) {
+        aggregateStats.byMethod[method] = (aggregateStats.byMethod[method] || 0) + count;
+      }
+
+      // Deferred second pass for chain/this/super refs collected by workers.
+      const deferredResult = this.resolver.resolveDeferredRefs({
+        chainRefs: deferredChainRefs,
+        thisMemberRefs: deferredThisMemberRefs,
+        superMemberRefs: deferredSuperMemberRefs,
+      });
+      aggregateStats.total += deferredResult.stats.total;
+      aggregateStats.resolved += deferredResult.stats.resolved;
+      aggregateStats.unresolved += deferredResult.stats.unresolved;
+      for (const [method, count] of Object.entries(deferredResult.stats.byMethod)) {
+        aggregateStats.byMethod[method] = (aggregateStats.byMethod[method] || 0) + count;
+      }
+    } finally {
+      await pool.close();
+    }
+
+    onProgress?.(total, total);
+    return {
+      resolved: [],
+      unresolved: [],
+      stats: aggregateStats,
+    };
   }
 
   /**

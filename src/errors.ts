@@ -229,7 +229,44 @@ export function logDebug(message: string, context?: Record<string, unknown>): vo
  * Log a warning message
  */
 export function logWarn(message: string, context?: Record<string, unknown>): void {
+  installNodeWarningFilter();
   currentLogger.warn(message, context);
+}
+
+/**
+ * Suppress Node.js noise that would otherwise spam the user's terminal.
+ *
+ * Two known sources today:
+ *   - `node:sqlite` (`NODE_EXPERIMENTAL_SQLITE`) — every worker thread emits
+ *     this once at import, so on a 7-worker resolve the user sees 7 copies.
+ *     We commit to the API; tracking is at https://github.com/jinglonglong/springgraph
+ *   - Wasming Emscripten `Aborted()` and `Build with -sASSERTIONS` — the
+ *     parse-worker filters these at the stderr.write level (see
+ *     src/extraction/parse-worker.ts).
+ *
+ * Other warnings are re-emitted via the standard mechanism so the user still
+ * sees deprecations, unhandled rejections, etc.
+ *
+ * Installed lazily on first import of this module — covers both the main
+ * process (CLI, MCP) and every spawned worker (parse-worker, resolve-worker
+ * each import logWarn below and thus trigger this side effect).
+ */
+function installNodeWarningFilter(): void {
+  if ((process as unknown as { __springgraphWarnFilterInstalled?: boolean })
+    .__springgraphWarnFilterInstalled) {
+    return;
+  }
+  (process as unknown as { __springgraphWarnFilterInstalled?: boolean })
+    .__springgraphWarnFilterInstalled = true;
+  process.on('warning', (warning) => {
+    if (warning.name === 'ExperimentalWarning' && /SQLite/.test(warning.message)) {
+      return;
+    }
+    // Re-emit other warnings using Node's standard format.
+    const code = (warning as { code?: string }).code;
+    const prefix = code ? `(${warning.name} ${code})` : `(${warning.name})`;
+    process.stderr.write(`${prefix} ${warning.message}\n`);
+  });
 }
 
 /**

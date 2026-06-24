@@ -1012,43 +1012,103 @@ export class ReferenceResolver {
       prevRemaining = remaining;
     }
 
-    // Dynamic-edge synthesis: now that all base `calls` edges are persisted,
-    // synthesize observer/callback dispatch edges (dispatcher → registered
-    // callbacks) that static parsing leaves out. Best-effort — never fail the
-    // index on it. See docs/design/callback-edge-synthesis.md.
-    try {
-      aggregateStats.byMethod['callback-synthesis'] = synthesizeCallbackEdges(this.queries, this.context);
-    } catch {
-      // synthesis is additive and optional; ignore failures
+    // Dynamic-edge synthesis and phase-4 relationship synthesis are shared
+    // between the single-threaded batched path and the parallel worker path.
+    const synthStats = this.runSynthesizers();
+    for (const [method, count] of Object.entries(synthStats)) {
+      aggregateStats.byMethod[method] = (aggregateStats.byMethod[method] || 0) + count;
     }
-
-    // Phase 4 relationship synthesis: Spring DI, interface dispatch, MyBatis
-    // Java↔XML links, Java field impact, and Spring config bindings. These are
-    // additive and best-effort; failures must not abort indexing.
-    try {
-      aggregateStats.byMethod['spring-bean-wiring'] = synthesizeSpringBeanWiring(this.queries, this.context);
-    } catch { /* additive */ }
-    try {
-      aggregateStats.byMethod['interface-impl-dispatch'] = synthesizeInterfaceImplDispatch(this.queries);
-    } catch { /* additive */ }
-    try {
-      aggregateStats.byMethod['class-extends-dispatch'] = synthesizeClassExtendsDispatch(this.queries);
-    } catch { /* additive */ }
-    try {
-      aggregateStats.byMethod['mybatis-xml-impact'] = synthesizeMyBatisEdges(this.queries, this.context);
-    } catch { /* additive */ }
-    try {
-      aggregateStats.byMethod['java-field-impact'] = synthesizeJavaFieldImpact(this.queries, this.context);
-    } catch { /* additive */ }
-    try {
-      const configResult = synthesizeSpringConfigImpact(this.queries, this.context);
-      aggregateStats.byMethod['spring-config-impact'] = configResult.edgesInserted;
-    } catch { /* additive */ }
 
     return {
       resolved: [],
       unresolved: [],
       stats: aggregateStats,
+    };
+  }
+
+  /**
+   * Run additive synthesizers that build on top of the resolved base edges.
+   * These are best-effort and never fail indexing. Returns a map of
+   * synthesizer name -> edge count. Used by the parallel resolution path so the
+   * main thread can still own persistence while workers handle the first pass.
+   */
+  runSynthesizers(): Record<string, number> {
+    const stats: Record<string, number> = {};
+
+    // Dynamic-edge synthesis: observer/callback dispatch edges.
+    try {
+      stats['callback-synthesis'] = synthesizeCallbackEdges(this.queries, this.context);
+    } catch {
+      // synthesis is additive and optional; ignore failures
+    }
+
+    // Phase 4 relationship synthesis: Spring DI, interface dispatch, MyBatis
+    // Java↔XML links, Java field impact, and Spring config bindings.
+    try {
+      stats['spring-bean-wiring'] = synthesizeSpringBeanWiring(this.queries, this.context);
+    } catch { /* additive */ }
+    try {
+      stats['interface-impl-dispatch'] = synthesizeInterfaceImplDispatch(this.queries);
+    } catch { /* additive */ }
+    try {
+      stats['class-extends-dispatch'] = synthesizeClassExtendsDispatch(this.queries);
+    } catch { /* additive */ }
+    try {
+      stats['mybatis-xml-impact'] = synthesizeMyBatisEdges(this.queries, this.context);
+    } catch { /* additive */ }
+    try {
+      stats['java-field-impact'] = synthesizeJavaFieldImpact(this.queries, this.context);
+    } catch { /* additive */ }
+    try {
+      const configResult = synthesizeSpringConfigImpact(this.queries, this.context);
+      stats['spring-config-impact'] = configResult.edgesInserted;
+    } catch { /* additive */ }
+
+    return stats;
+  }
+
+  /**
+   * Second-resolution pass for refs collected during the parallel first pass.
+   * The parallel workers return deferred chain/this/super refs; this method
+   * runs the same three specialized passes the single-threaded path uses and
+   * persists the resulting edges from the main thread. Returns an aggregate
+   * ResolutionResult for observability.
+   */
+  resolveDeferredRefs(deferred: {
+    chainRefs: UnresolvedRef[];
+    thisMemberRefs: UnresolvedRef[];
+    superMemberRefs: UnresolvedRef[];
+  }): ResolutionResult {
+    const total = deferred.chainRefs.length + deferred.thisMemberRefs.length + deferred.superMemberRefs.length;
+    if (total === 0) {
+      return {
+        resolved: [],
+        unresolved: [],
+        stats: { total: 0, resolved: 0, unresolved: 0, byMethod: {} },
+      };
+    }
+
+    // Load the deferred refs into the resolver's private arrays and let the
+    // existing specialized passes drain them.
+    this.deferredChainRefs = deferred.chainRefs;
+    this.deferredThisMemberRefs = deferred.thisMemberRefs;
+    this.deferredSuperMemberRefs = deferred.superMemberRefs;
+
+    const byMethod: Record<string, number> = {};
+    byMethod['conformance-chain'] = this.resolveChainedCallsViaConformance();
+    byMethod['deferred-this-member'] = this.resolveDeferredThisMemberRefs();
+    byMethod['super-member'] = this.resolveSuperMemberCalls();
+
+    const resolvedCount = byMethod['conformance-chain'] + byMethod['deferred-this-member'] + byMethod['super-member'];
+    return {
+      resolved: [],
+      unresolved: [],
+      stats: {
+        total,
+        resolved: resolvedCount,
+        unresolved: total - resolvedCount,
+        byMethod,
+      },
     };
   }
 

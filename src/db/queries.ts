@@ -216,6 +216,7 @@ export class QueryBuilder {
     getNodesByLowerName?: SqliteStatement;
     getUnresolvedCount?: SqliteStatement;
     getUnresolvedBatch?: SqliteStatement;
+    getUnresolvedBatchAfterId?: SqliteStatement;
     getAllFilePaths?: SqliteStatement;
     getAllNodeNames?: SqliteStatement;
     getDominantFile?: SqliteStatement;
@@ -1632,6 +1633,32 @@ export class QueryBuilder {
     }
     const rows = this.stmts.getUnresolvedBatch.all(limit, offset) as UnresolvedRefRow[];
     return rows.map((row) => ({
+      fromNodeId: row.from_node_id,
+      referenceName: row.reference_name,
+      referenceKind: row.reference_kind as EdgeKind,
+      line: row.line,
+      column: row.col,
+      candidates: row.candidates ? safeJsonParse(row.candidates, undefined) : undefined,
+      filePath: row.file_path,
+      language: row.language as Language,
+    }));
+  }
+
+  /**
+   * Get the next batch of unresolved references whose id is greater than
+   * `afterId`. Ordering by the monotonically-increasing `id` column lets a
+   * caller pipeline multiple batches without waiting for the previous batch to
+   * be deleted from the table.
+   */
+  getUnresolvedReferencesBatchAfterId(afterId: number, limit: number): UnresolvedReference[] {
+    if (!this.stmts.getUnresolvedBatchAfterId) {
+      this.stmts.getUnresolvedBatchAfterId = this.db.prepare(
+        'SELECT * FROM unresolved_refs WHERE id > ? ORDER BY id LIMIT ?'
+      );
+    }
+    const rows = this.stmts.getUnresolvedBatchAfterId.all(afterId, limit) as UnresolvedRefRow[];
+    return rows.map((row) => ({
+      id: row.id,
       fromNodeId: row.from_node_id,
       referenceName: row.reference_name,
       referenceKind: row.reference_kind as EdgeKind,
