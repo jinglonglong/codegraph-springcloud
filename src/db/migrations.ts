@@ -9,7 +9,7 @@ import { SqliteDatabase } from './sqlite-adapter';
 /**
  * Current schema version
  */
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 /**
  * Migration definition
@@ -115,6 +115,31 @@ const migrations: Migration[] = [
         -- this when cheap_hash is the only filter (the common case
         -- during a re-init on an unchanged tree).
         CREATE INDEX IF NOT EXISTS idx_files_cheap_hash ON files(cheap_hash);
+      `);
+    },
+  },
+  {
+    version: 8,
+    description: 'Add modules table and files.module_id foreign key for multi-module hierarchy',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS modules (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_root TEXT NOT NULL,
+          path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          parent_path TEXT,
+          packaging TEXT NOT NULL,
+          is_service INTEGER DEFAULT 0,
+          main_class_node_id TEXT,
+          port INTEGER,
+          pom_path TEXT NOT NULL,
+          UNIQUE(project_root, path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_modules_parent ON modules(project_root, parent_path);
+        CREATE INDEX IF NOT EXISTS idx_modules_service ON modules(project_root, is_service);
+        ALTER TABLE files ADD COLUMN module_id INTEGER REFERENCES modules(id);
+        CREATE INDEX IF NOT EXISTS idx_files_module ON files(module_id);
       `);
     },
   },

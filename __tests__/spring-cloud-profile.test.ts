@@ -146,11 +146,17 @@ describe('spring-cloud profile', () => {
     expect(springCloudProfile.roles.length).toBe(15);
   });
 
-  it('registers the four required facets', () => {
+  it('registers the five required facets', () => {
     expect(springCloudProfile.facetIds).toEqual(
-      expect.arrayContaining(['spring-naming', 'spring-annotation', 'maven-module', 'spring-entrypoint'])
+      expect.arrayContaining([
+        'spring-naming',
+        'spring-annotation',
+        'maven-module',
+        'maven-module-tree',
+        'spring-entrypoint',
+      ])
     );
-    expect(springCloudProfile.facetIds.length).toBe(4);
+    expect(springCloudProfile.facetIds.length).toBe(5);
     for (const id of springCloudProfile.facetIds) {
       expect(facetRegistry.getFacet(id)).toBeDefined();
     }

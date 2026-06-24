@@ -299,11 +299,11 @@ describe('Best-Candidate Resolution', () => {
 describe('Schema v2 Migration', () => {
   it.skipIf(!HAS_SQLITE)('should have correct current schema version', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../src/db/migrations');
-    // Bumped to 7 by the init-performance change, phase 1, task 1.3
-    // (openspec/changes/optimize-initialization-performance). v7 adds
-    // files.cheap_hash and files.blob_oid for the incremental-skip
-    // path; see src/db/migrations.ts.
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    // Bumped to 8 by the Spring Cloud module-recognition change
+    // (openspec/changes/v2-architecture-profile-engine). v8 adds the
+    // modules table and files.module_id for multi-module/service detection;
+    // see src/db/migrations.ts.
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
   });
 
   it.skipIf(!HAS_SQLITE)('should have migration for version 2', async () => {

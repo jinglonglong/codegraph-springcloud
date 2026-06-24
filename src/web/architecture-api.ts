@@ -161,6 +161,8 @@ export async function handleArchitectureProfiles(
     profileConfidence: activeMatch?.confidence ?? 0,
     layers: snapshot.profile.layers,
     roles: snapshot.profile.roles,
+    moduleTree: snapshot.moduleTree,
+    serviceModules: snapshot.serviceModules,
     matches: snapshot.result.allMatches.map((m) => ({
       profileName: profileRegistry.findByName(m.profileName)?.name ?? m.profileName,
       confidence: m.confidence,

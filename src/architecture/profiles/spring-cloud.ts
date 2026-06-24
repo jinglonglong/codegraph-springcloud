@@ -14,6 +14,12 @@ import { AnnotationAdapter, AnnotationFact } from '../adapters/types';
 import { facetRegistry } from '../facet-engine';
 import { genericProfile, profileRegistry } from '../profile-registry';
 import { Language, Node, NodeKind } from '../../types';
+import {
+  buildModuleTree,
+  detectServicesAndPorts,
+  findModuleForFile,
+  ParsedPom,
+} from '../pom-tree-parser';
 
 /**
  * Spring Cloud architecture profile.
@@ -398,6 +404,153 @@ export const mavenModuleFacet: ArchitectureFacet = {
 };
 
 // =============================================================================
+// maven-module-tree facet
+// =============================================================================
+
+function determineModuleType(
+  mod: ParsedPom,
+  serviceInfo: { isService: boolean; mainClassNodeId?: string; port?: number }
+): 'service' | 'library' | 'parent-pom' {
+  if (serviceInfo.isService) return 'service';
+  if (mod.packaging === 'pom' && mod.modules.length > 0) return 'parent-pom';
+  return 'library';
+}
+
+function getModuleParentPath(relativePath: string): string | null {
+  if (!relativePath) return null;
+  const parent = path.dirname(relativePath).replace(/\\/g, '/');
+  return parent === '.' ? '' : parent;
+}
+
+export const mavenModuleTreeFacet: ArchitectureFacet = {
+  id: 'maven-module-tree',
+  name: 'Maven Module Tree',
+  description:
+    'Parses the Maven pom.xml hierarchy, identifies Spring Boot services, ports, and maps files to their owning module.',
+
+  detect(context: ArchitectureContext): ArchitectureSignal[] {
+    const signals: ArchitectureSignal[] = [];
+    const filePaths = getFilePaths(context);
+    const pomPaths = filePaths.filter(p => path.basename(p).toLowerCase() === 'pom.xml');
+    if (pomPaths.length === 0) return signals;
+
+    const modules = buildModuleTree(context.projectRoot, filePaths);
+    if (modules.length === 0) return signals;
+
+    const serviceMap = detectServicesAndPorts(
+      context.projectRoot,
+      modules,
+      context.db,
+      filePaths
+    );
+
+    const sqlite = context.db.getDb();
+    const transaction = sqlite.transaction(() => {
+      // Clear stale module data for this project. Null out file FKs first so
+      // the modules DELETE does not trip the foreign-key constraint.
+      sqlite.prepare('UPDATE files SET module_id = NULL').run();
+      sqlite.prepare('DELETE FROM modules').run();
+
+      const insertStmt = sqlite.prepare(
+        `INSERT INTO modules (
+          project_root, path, name, parent_path,
+          packaging, is_service, port, main_class_node_id, pom_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+
+      const moduleIdByPath = new Map<string, number | bigint>();
+
+      // Insert modules in parent-before-child order so parent_path resolves cleanly
+      const sortedModules = [...modules].sort(
+        (a, b) => a.relativePath.length - b.relativePath.length
+      );
+
+      for (const mod of sortedModules) {
+        const serviceInfo = serviceMap.get(mod.relativePath) || { isService: false };
+        const moduleType = determineModuleType(mod, serviceInfo);
+        const parentPath = getModuleParentPath(mod.relativePath);
+
+        const result = insertStmt.run(
+          context.projectRoot,
+          mod.relativePath,
+          mod.artifactId,
+          parentPath,
+          mod.packaging,
+          moduleType === 'service' ? 1 : 0,
+          serviceInfo.port ?? null,
+          serviceInfo.mainClassNodeId ?? null,
+          mod.pomPath
+        );
+        moduleIdByPath.set(mod.relativePath, result.lastInsertRowid);
+      }
+
+      // Map each file to its closest owning module
+      const prefixSortedModules = [...modules].sort(
+        (a, b) => b.relativePath.length - a.relativePath.length
+      );
+      const updateFileStmt = sqlite.prepare('UPDATE files SET module_id = ? WHERE path = ?');
+
+      for (const filePath of filePaths) {
+        const mod = findModuleForFile(filePath, prefixSortedModules);
+        if (mod) {
+          const moduleId = moduleIdByPath.get(mod.relativePath);
+          if (moduleId !== undefined) {
+            updateFileStmt.run(moduleId, filePath);
+          }
+        }
+      }
+
+      return moduleIdByPath;
+    });
+
+    transaction();
+
+    // Emit project-level signal summarizing the module tree
+    const serviceModules = [...serviceMap.entries()].filter(([, info]) => info.isService);
+    signals.push({
+      facetName: 'maven-module-tree',
+      profileName: 'spring-cloud',
+      confidence: 0.9,
+      evidence: [
+        `Parsed ${modules.length} Maven module${modules.length === 1 ? '' : 's'}`,
+        `Identified ${serviceModules.length} Spring Boot service${serviceModules.length === 1 ? '' : 's'}`,
+      ],
+      scope: 'project',
+      metadata: {
+        moduleCount: modules.length,
+        serviceCount: serviceModules.length,
+      },
+    });
+
+    // Emit node-level signal for each service main class so it can be marked as entrypoint
+    for (const [relPath, info] of serviceMap.entries()) {
+      if (info.mainClassNodeId) {
+        const mod = modules.find(m => m.relativePath === relPath);
+        signals.push({
+          nodeId: info.mainClassNodeId,
+          facetName: 'maven-module-tree',
+          profileName: 'spring-cloud',
+          confidence: 0.95,
+          evidence: [
+            `Spring Boot application class in module ${mod?.artifactId || relPath}` +
+              (info.port ? ` (port ${info.port})` : ''),
+          ],
+          scope: 'node',
+          module: relPath,
+          metadata: {
+            moduleType: 'service',
+            isEntrypoint: true,
+            port: info.port,
+          },
+        });
+      }
+    }
+
+    return signals;
+  },
+};
+
+// =============================================================================
 // spring-entrypoint facet
 // =============================================================================
 
@@ -472,6 +625,7 @@ export const springCloudFacets: ArchitectureFacet[] = [
   springNamingFacet,
   springAnnotationFacet,
   mavenModuleFacet,
+  mavenModuleTreeFacet,
   springEntrypointFacet,
 ];
 

@@ -18,6 +18,7 @@ import { profileRegistry } from './profile-registry';
 import type {
   ArchitectureProfile,
   ArchitectureSnapshot,
+  ModuleNode,
   NodeArchitectureFacet,
   ProfileDetectionResult,
 } from './types';
@@ -43,6 +44,82 @@ function getCgDb(cg: Springgraph): DatabaseConnection {
 
 function collectArchitectureNodes(cg: Springgraph): Node[] {
   return cg.getNodesByKind('class').concat(cg.getNodesByKind('interface'));
+}
+
+function isMainClassNode(node: Node): boolean {
+  if (node.kind !== 'class') return false;
+  const decorators = node.decorators ?? [];
+  const hasBootApp = decorators.some((d) => d.includes('SpringBootApplication'));
+  return hasBootApp;
+}
+
+function isMainMethodNode(node: Node): boolean {
+  return node.kind === 'method' && node.name === 'main' && (node.signature?.includes('static') ?? false);
+}
+
+function changedFilesMayAffectServices(cg: Springgraph, filePaths: string[]): boolean {
+  return filePaths.some((fp) => {
+    if (!fp.endsWith('.java')) return false;
+    const nodes = cg.getNodesInFile(fp);
+    return nodes.some((n) => isMainClassNode(n) || isMainMethodNode(n));
+  });
+}
+
+function loadModuleTree(db: DatabaseConnection): ModuleNode[] {
+  interface ModuleRow {
+    id: number;
+    path: string;
+    name: string;
+    packaging: string;
+    is_service: number;
+    port: number | null;
+    main_class_node_id: string | null;
+    parent_path: string | null;
+  }
+
+  let rows: ModuleRow[] = [];
+  try {
+    rows = db.getDb().prepare(
+      `SELECT id, path, name, packaging, is_service, port, main_class_node_id, parent_path
+       FROM modules
+       ORDER BY path`
+    ).all() as ModuleRow[];
+  } catch {
+    return [];
+  }
+
+  const nodeByPath = new Map<string, ModuleNode>();
+  const roots: ModuleNode[] = [];
+
+  for (const row of rows) {
+    const node: ModuleNode = {
+      id: row.id,
+      path: row.path,
+      name: row.name || row.path.split('/').pop() || row.path || 'root',
+      parentPath: row.parent_path,
+      packaging: row.packaging,
+      isService: row.is_service === 1,
+      port: row.port ?? undefined,
+      mainClassNodeId: row.main_class_node_id ?? undefined,
+      children: [],
+    };
+    nodeByPath.set(row.path, node);
+  }
+
+  for (const node of nodeByPath.values()) {
+    if (node.parentPath === null || node.parentPath === undefined) {
+      roots.push(node);
+    } else {
+      const parent = nodeByPath.get(node.parentPath);
+      if (parent) {
+        parent.children!.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+  }
+
+  return roots;
 }
 
 function buildFullState(cg: Springgraph): CachedArchitectureState {
@@ -158,6 +235,16 @@ export class ArchitectureFacetCache {
           this.cg.getNodesInFile(fp).some((n) => n.kind === 'class' || n.kind === 'interface')
         );
 
+      const mayChangeServiceBoundaries =
+        changedFilesMayAffectServices(this.cg, changedFilePaths) ||
+        removedFilePaths.some((fp) => fp.endsWith('.java'));
+
+      if (mayChangeServiceBoundaries) {
+        this.state = buildFullState(this.cg);
+        this.generation += 1;
+        return { snapshot: this.toSnapshot(this.state), generation: this.generation };
+      }
+
       if (hasClassInterfaceChanges) {
         const newNodes = collectArchitectureNodes(this.cg);
         const currentCount = this.state.facets.size;
@@ -257,11 +344,26 @@ export class ArchitectureFacetCache {
   }
 
   private toSnapshot(state: CachedArchitectureState): ArchitectureSnapshot {
+    const moduleTree = loadModuleTree(getCgDb(this.cg));
+    const serviceModules = moduleTree.flatMap((m) => collectServiceModules(m));
     return {
       result: state.result,
       profile: state.profile,
       facets: state.facets,
       nodes: collectArchitectureNodes(this.cg),
+      moduleTree,
+      serviceModules,
     };
   }
+}
+
+function collectServiceModules(node: ModuleNode): ModuleNode[] {
+  const result: ModuleNode[] = [];
+  if (node.isService) {
+    result.push(node);
+  }
+  for (const child of node.children ?? []) {
+    result.push(...collectServiceModules(child));
+  }
+  return result;
 }

@@ -71,11 +71,13 @@ export class DefaultFacetSignalAggregator implements FacetSignalAggregator {
       let bestRole: ArchitectureRole | undefined;
       let bestLayer: ArchitectureLayer | undefined;
       let bestModule: string | undefined;
+      let bestModuleType: 'service' | 'library' | 'parent-pom' | undefined;
       let bestPackage: string | undefined;
       let isEntrypoint = false;
 
       let maxRoleConfidence = -1;
       let maxLayerConfidence = -1;
+      let maxModuleConfidence = -1;
 
       const combinedEvidence: string[] = [];
 
@@ -85,6 +87,7 @@ export class DefaultFacetSignalAggregator implements FacetSignalAggregator {
         const role = s.metadata?.role || s.metadata?.roleId;
         const layer = s.metadata?.layer || s.metadata?.layerId;
         const module = s.module || s.metadata?.module;
+        const moduleType = s.metadata?.moduleType as 'service' | 'library' | 'parent-pom' | undefined;
         const packageName = s.metadata?.packageName;
         const entrypoint = s.metadata?.isEntrypoint || s.metadata?.entrypoint;
 
@@ -98,8 +101,10 @@ export class DefaultFacetSignalAggregator implements FacetSignalAggregator {
           maxLayerConfidence = s.confidence;
         }
 
-        if (module) {
+        if (module && s.confidence > maxModuleConfidence) {
           bestModule = module;
+          bestModuleType = moduleType;
+          maxModuleConfidence = s.confidence;
         }
 
         if (packageName) {
@@ -119,6 +124,7 @@ export class DefaultFacetSignalAggregator implements FacetSignalAggregator {
         role: bestRole,
         layer: bestLayer,
         module: bestModule,
+        moduleType: bestModuleType,
         packageName: bestPackage,
         isEntrypoint,
         profileId: signals[0]?.profileName,
@@ -202,6 +208,68 @@ export class FacetEngine {
 
     // 4. Resolve role conflicts across computed node facets
     resolveRole(nodeFacets);
+
+    // 5. Enrich every node facet with module/moduleType from files.module_id JOIN modules.
+    //    This ensures all nodes inside a Maven module get module info even if no facet
+    //    emitted a signal for them.
+    const nodeIdToFilePath = new Map<string, string>();
+    for (const node of nodes) {
+      if (node.filePath) {
+        nodeIdToFilePath.set(node.id, node.filePath);
+      }
+    }
+
+    if (nodeIdToFilePath.size > 0) {
+      try {
+        const sqlite = db.getDb();
+        const rows = sqlite
+          .prepare(
+            `SELECT n.id AS node_id, m.path, m.is_service
+             FROM nodes n
+             JOIN files ON n.file_path = files.path
+             JOIN modules m ON files.module_id = m.id`
+          )
+          .all() as Array<{ node_id: string; path: string; is_service: number }>;
+
+        const moduleInfoByNodeId = new Map<
+          string,
+          { module: string; moduleType: 'service' | 'library' | 'parent-pom' }
+        >();
+        for (const row of rows) {
+          moduleInfoByNodeId.set(row.node_id, {
+            module: row.path,
+            moduleType: row.is_service ? 'service' : 'library',
+          });
+        }
+
+        for (const facet of nodeFacets) {
+          const info = moduleInfoByNodeId.get(facet.nodeId);
+          if (info && !facet.module) {
+            facet.module = info.module;
+            facet.moduleType = info.moduleType;
+          }
+        }
+
+        // Also create facets for nodes that have module info but no signals at all
+        const existingNodeIds = new Set(nodeFacets.map(f => f.nodeId));
+        for (const [nodeId, info] of moduleInfoByNodeId.entries()) {
+          if (existingNodeIds.has(nodeId)) continue;
+          const filePath = nodeIdToFilePath.get(nodeId);
+          nodeFacets.push({
+            nodeId,
+            facetName: this.profile.name,
+            confidence: 0.5,
+            evidence: filePath ? [`File belongs to module ${info.module}`] : [],
+            module: info.module,
+            moduleType: info.moduleType,
+            profileId: this.profile.id,
+            isEntrypoint: false,
+          });
+        }
+      } catch (err) {
+        console.error('[FacetEngine] Error enriching node facets with module info:', err);
+      }
+    }
 
     // Update the aggregator with signals for backward compatibility/external users
     this.aggregator.addSignals(this.signals);
@@ -296,6 +364,7 @@ export class FacetEngine {
 
     let maxModuleConf = -1;
     let bestModule: string | undefined = undefined;
+    let bestModuleType: 'service' | 'library' | 'parent-pom' | undefined = undefined;
 
     let bestPackage: string | undefined = undefined;
 
@@ -316,9 +385,11 @@ export class FacetEngine {
       }
 
       const mod = signal.module || signal.metadata?.module;
+      const modType = signal.metadata?.moduleType as 'service' | 'library' | 'parent-pom' | undefined;
       if (mod && signal.confidence > maxModuleConf) {
         maxModuleConf = signal.confidence;
         bestModule = mod;
+        bestModuleType = modType;
       }
 
       const pkg = signal.metadata?.packageName || signal.metadata?.package;
@@ -339,6 +410,7 @@ export class FacetEngine {
     }
     if (bestModule !== undefined) {
       nodeFacet.module = bestModule;
+      nodeFacet.moduleType = bestModuleType;
     }
     if (bestPackage !== undefined) {
       nodeFacet.packageName = bestPackage;
