@@ -928,7 +928,7 @@ export class Springgraph {
           }
         }
 
-        onProgress?.(aggregateStats.total, total);
+        onProgress?.(aggregateStats.resolved, total);
       }
 
       // Additive synthesizers (run on main thread so they can write edges).
@@ -954,6 +954,8 @@ export class Springgraph {
     }
 
     // Mark the resolve phase complete in the UI and collapse worker bars.
+    // This happens *before* synthesizers/deferred refs so the user sees the
+    // parallel resolve stage finish cleanly instead of freezing near 100%.
     try {
       const { getCurrentShimmerProgress } = require('./ui/shimmer-progress') as typeof import('./ui/shimmer-progress');
       getCurrentShimmerProgress()?.updateWorkers('resolving', []);
@@ -962,7 +964,25 @@ export class Springgraph {
       /* progress UI not active — ignore */
     }
 
-    onProgress?.(total, total);
+    // Additive synthesizers (run on main thread so they can write edges).
+    const synthStats = this.resolver.runSynthesizers();
+    for (const [method, count] of Object.entries(synthStats)) {
+      aggregateStats.byMethod[method] = (aggregateStats.byMethod[method] || 0) + count;
+    }
+
+    // Deferred second pass for chain/this/super refs collected by workers.
+    const deferredResult = this.resolver.resolveDeferredRefs({
+      chainRefs: deferredChainRefs,
+      thisMemberRefs: deferredThisMemberRefs,
+      superMemberRefs: deferredSuperMemberRefs,
+    });
+    aggregateStats.total += deferredResult.stats.total;
+    aggregateStats.resolved += deferredResult.stats.resolved;
+    aggregateStats.unresolved += deferredResult.stats.unresolved;
+    for (const [method, count] of Object.entries(deferredResult.stats.byMethod)) {
+      aggregateStats.byMethod[method] = (aggregateStats.byMethod[method] || 0) + count;
+    }
+
     return {
       resolved: [],
       unresolved: [],

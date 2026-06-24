@@ -483,14 +483,11 @@ export class ResolveWorkerPool {
     this.lastProgressAt = now;
 
     if (this.onProgress) {
-      let currentInFlight = 0;
-      for (const inflight of this.inFlight.values()) {
-        // We don't track per-batch current precisely; count in-flight batches
-        // as completed for progress so the bar moves steadily as batches land.
-        currentInFlight += inflight.refs.length;
-      }
-      const current = this.resolvedCompleted + currentInFlight;
-      const safeCurrent = Math.min(current, this.totalSubmitted);
+      // Aggregate progress must be monotonic: only count refs that have
+      // actually been resolved. Counting in-flight batches as done makes the
+      // bar leap forward when batches are dispatched and then fall back when
+      // they finish with unresolved refs, which looks like a bug.
+      const safeCurrent = Math.min(this.resolvedCompleted, this.totalSubmitted);
       this.onProgress(safeCurrent, this.totalSubmitted);
     }
 

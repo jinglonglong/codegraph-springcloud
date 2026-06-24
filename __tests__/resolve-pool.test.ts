@@ -169,6 +169,12 @@ describe('ResolveWorkerPool', () => {
       const last = progressCalls[progressCalls.length - 1]!;
       expect(last.total).toBeGreaterThan(0);
       expect(last.current).toBeGreaterThanOrEqual(last.total);
+
+      // Aggregate progress must be monotonic: counting in-flight batches as
+      // done used to make the bar leap forward and then fall back.
+      for (let i = 1; i < progressCalls.length; i++) {
+        expect(progressCalls[i]!.current).toBeGreaterThanOrEqual(progressCalls[i - 1]!.current);
+      }
     } finally {
       await pool.close();
     }
