@@ -317,7 +317,17 @@ export function matchByExactName(
   ref: UnresolvedRef,
   context: ResolutionContext
 ): ResolvedRef | null {
-  const candidates = applyLanguageGate(context.getNodesByName(ref.referenceName), ref);
+  // `import`-kind nodes are import STATEMENTS, not definitions, so a reference
+  // resolving to a sibling file's `import` is a meaningless edge — the real
+  // import→definition resolution is the import resolver's job (resolveViaImport),
+  // never name-matching here. Excluding them also removes a quadratic blow-up:
+  // a ubiquitous package (`react`, `@superset-ui/core`, Python `logging`/`typing`)
+  // is re-declared as an `import` node in every file that imports it, so K
+  // unresolved import refs each scored K same-named import candidates through
+  // findBestMatch — O(K²) per package, the dominant cost of "Resolving refs" on
+  // large import-heavy (front-end + back-end) repos (#915).
+  const candidates = applyLanguageGate(context.getNodesByName(ref.referenceName), ref)
+    .filter((n) => n.kind !== 'import');
 
   if (candidates.length === 0) {
     return null;
@@ -1119,16 +1129,22 @@ function splitCamelCase(str: string): string[] {
 }
 
 /**
- * Compute directory proximity between two file paths.
- * Returns a score based on the number of shared directory segments.
+ * Compute directory proximity from a pre-split list of directory segments
+ * (`filePath1` minus its filename) and a second file path.
+ * Returns a score based on the number of shared leading directory segments.
  * Higher score = closer in directory tree.
+ *
+ * Split into a pre-split variant because findBestMatch scores every candidate
+ * against the SAME `ref.filePath`; re-splitting it per candidate was a hot spot
+ * on large repos (#915), so the caller splits it once and passes the segments.
  */
-function computePathProximity(filePath1: string, filePath2: string): number {
-  const dir1 = filePath1.split('/').slice(0, -1);
-  const dir2 = filePath2.split('/').slice(0, -1);
+function pathProximityFromDirs(dir1: string[], filePath2: string): number {
+  const dir2 = filePath2.split('/');
+  dir2.pop(); // drop filename — matches the original slice(0, -1) on both paths
 
   let shared = 0;
-  for (let i = 0; i < Math.min(dir1.length, dir2.length); i++) {
+  const limit = Math.min(dir1.length, dir2.length);
+  for (let i = 0; i < limit; i++) {
     if (dir1[i] === dir2[i]) {
       shared++;
     } else {
@@ -1138,6 +1154,15 @@ function computePathProximity(filePath1: string, filePath2: string): number {
 
   // Each shared directory segment contributes 15 points, capped at 80
   return Math.min(shared * 15, 80);
+}
+
+/**
+ * Compute directory proximity between two file paths.
+ * Returns a score based on the number of shared directory segments.
+ */
+function computePathProximity(filePath1: string, filePath2: string): number {
+  const dir1 = filePath1.split('/').slice(0, -1);
+  return pathProximityFromDirs(dir1, filePath2);
 }
 
 /**
@@ -1158,6 +1183,8 @@ function findBestMatch(
   let bestScore = -1;
   let bestNode: Node | null = null;
 
+  const refDirSegments = ref.filePath.split('/').slice(0, -1);
+
   for (const candidate of candidates) {
     let score = 0;
 
@@ -1167,7 +1194,7 @@ function findBestMatch(
     }
 
     // Directory proximity bonus — strongly prefer same module/package
-    score += computePathProximity(ref.filePath, candidate.filePath);
+    score += pathProximityFromDirs(refDirSegments, candidate.filePath);
 
     // Language matching: strongly prefer same language, penalize cross-language
     if (candidate.language === ref.language) {
@@ -1221,6 +1248,17 @@ function findBestMatch(
     if (score > bestScore) {
       bestScore = score;
       bestNode = candidate;
+    }
+  }
+
+  // Cross-language fallback only when no same-language candidate survived.
+  // This prevents e.g. a TypeScript reference from latching onto a Python file
+  // that happens to share a name, which was a source of bad edges on polyglot
+  // repos (#915).
+  if (bestNode && ref.language && bestNode.language !== ref.language) {
+    const sameLanguage = candidates.filter((c) => c.language === ref.language);
+    if (sameLanguage.length > 0) {
+      bestNode = findBestMatch(ref, sameLanguage, _context);
     }
   }
 
