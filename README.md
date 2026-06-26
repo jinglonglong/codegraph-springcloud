@@ -125,12 +125,20 @@ springgraph install -y
 
 ### 没有 Spring Cloud 项目?
 
+仓库自带一个最小可运行的 Spring Boot + Spring Cloud 示例,包含 2 个
+Controller、2 个 Service、2 个 MyBatis Mapper、1 个 OpenFeign Client 和
+1 个 `@Scheduled` 任务。索引只需要 5 秒左右,跑完即可在 Web UI 中看到
+完整图谱。
+
 ```bash
-git clone https://github.com/jinglonglong/springgraph-demo.git
-cd springgraph-demo
+cd examples/springcloud-demo
 npx @jinglonglong/springgraph init -i
 npx @jinglonglong/springgraph web
 ```
+
+示例的 MCP 工具覆盖矩阵与跑通问题见
+[`examples/springcloud-demo/README.md`](./examples/springcloud-demo/README.md),
+以及 [`examples/README.md`](./examples/README.md)。
 
 ### 其它安装方式
 
